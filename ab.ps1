@@ -58,8 +58,8 @@ do {
             Write-Host "Press any key to return to menu..." -ForegroundColor Yellow
             $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
             Clear-Host
-            & "$PSCommandPath"  # Restart the script
-            return
+            Start-Process PowerShell -ArgumentList "-ExecutionPolicy Bypass -File `"$PSCommandPath`"" -NoNewWindow
+            exit
         }
         "2" {
             Write-Host "`nDownloading Moss File Checker..." -ForegroundColor Yellow
@@ -73,8 +73,8 @@ do {
             Write-Host "Press any key to return to menu..." -ForegroundColor Yellow
             $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
             Clear-Host
-            & "$PSCommandPath"  # Restart the script
-            return
+            Start-Process PowerShell -ArgumentList "-ExecutionPolicy Bypass -File `"$PSCommandPath`"" -NoNewWindow
+            exit
         }
         "3" {
             Write-Host "`nStarting Generic Analysis..." -ForegroundColor Green
@@ -110,8 +110,8 @@ do {
             Write-Host "Press any key to return to menu..." -ForegroundColor Yellow
             $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
             Clear-Host
-            & "$PSCommandPath"  # Restart the script
-            return
+            Start-Process PowerShell -ArgumentList "-ExecutionPolicy Bypass -File `"$PSCommandPath`"" -NoNewWindow
+            exit
         }
         default {
             Write-Host "Invalid choice. Please enter 1, 2, 3, or 4." -ForegroundColor Red
