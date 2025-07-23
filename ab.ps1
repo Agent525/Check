@@ -58,7 +58,7 @@ do {
             Write-Host "Press any key to return to menu..." -ForegroundColor Yellow
             $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
             Clear-Host
-            & $PSCommandPath  # Restart the script
+            & "$PSCommandPath"  # Restart the script
             return
         }
         "2" {
