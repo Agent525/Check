@@ -73,7 +73,7 @@ do {
             Write-Host "Press any key to return to menu..." -ForegroundColor Yellow
             $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
             Clear-Host
-            & $PSCommandPath  # Restart the script
+            & "$PSCommandPath"  # Restart the script
             return
         }
         "3" {
@@ -82,7 +82,8 @@ do {
         }
         "4" {
             Write-Host "`nDelete Previous Filebin" -ForegroundColor Red
-            Write-Host "Current system bin name: PCCHECK$env:COMPUTERNAME" -ForegroundColor Cyan
+            Write-Host "`nPlease use just the bin name, not the full URL." -ForegroundColor Cyan
+            Write-Host "`nThe bin name will look like PCCHECK<COMPUTERNAME> and then a unique 3 digit identifier" -ForegroundColor Cyan
             Write-Host ""
             $binName = Read-Host "Enter the bin name to delete"
             
@@ -90,13 +91,9 @@ do {
                 Write-Host "`nDeleting filebin: $binName..." -ForegroundColor Yellow
                 try {
                     $deleteUrl = "https://filebin.net/$binName"
-                    $curlDeleteArgs = @(
-                        '-X', 'DELETE',
-                        $deleteUrl,
-                        '-H', 'accept: application/json'
-                    )
                     
-                    $deleteResult = & curl @curlDeleteArgs 2>&1
+                    # Execute curl command using full path to avoid PowerShell alias
+                    $deleteResult = & "C:\Windows\System32\curl.exe" -X DELETE $deleteUrl -H "accept: application/json" 2>&1
                     
                     if ($LASTEXITCODE -eq 0) {
                         Write-Host "Filebin deleted successfully!" -ForegroundColor Green
@@ -113,7 +110,7 @@ do {
             Write-Host "Press any key to return to menu..." -ForegroundColor Yellow
             $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
             Clear-Host
-            & $PSCommandPath  # Restart the script
+            & "$PSCommandPath"  # Restart the script
             return
         }
         default {
@@ -130,7 +127,7 @@ function Update-Progress {
     param($ActivityName)
     $script:currentSection++
     $percentComplete = ($script:currentSection / $totalSections) * 100
-    Write-Progress -Activity "Security Analysis" -Status $ActivityName -PercentComplete $percentComplete
+    Write-Progress -Activity "General Analysis" -Status $ActivityName -PercentComplete $percentComplete
 }
 
 # Create findings file with timestamp
