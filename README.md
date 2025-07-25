@@ -91,7 +91,8 @@ Removes previously uploaded analysis reports from filebin.net
 | **USB Drives Scan** | Complete USB drive content analysis with cheat detection |
 | **Downloads** | Suspicious file analysis in Downloads folder with signature checking |
 | **Prefetch Files** | Windows prefetch examination |
-| **Recent Files** | **NEW:** Shell:recent folder analysis with cheat detection |
+| **Recent Files** | Shell:recent folder analysis with cheat detection |
+| **Browser History** | **NEW:** Multi-browser history extraction (Chrome, Firefox, Edge, Opera, Brave) |
 | **MuiCache** | Registry execution artifacts |
 | **AppSwitched** | Application switching history |
 | **DLL OpenWithList** | DLL association analysis |
@@ -139,7 +140,7 @@ PCIE Device: [Device Name] - PCI - Vendor ID: [XXXX] Device ID: [XXXX]
 ```
 
 ### Progress Tracking
-- 21 total analysis sections
+- 22 total analysis sections
 - Real-time progress indication
 - Error handling with graceful degradation
 
@@ -197,12 +198,19 @@ Review the generated `FindingsMM-DD.txt` file for:
   - **Automatic cheat identification** with naming conventions
   - **Prioritized reporting** - detected cheats appear at the top of relevant sections
   - **Multi-location scanning** - Downloads folder, USB drives, and Recent files
-- **NEW: Recent Files Analysis**
+- **Recent Files Analysis**
   - **Shell:recent folder scanning** for recently accessed files
   - **Shortcut resolution** to identify actual file locations
   - **Multi-format support** for .exe, .dll, .zip, .rar files
   - **Integrated cheat detection** with signature database
   - **Digital signature verification** for executables and DLLs
+- **NEW: Browser History Extraction**
+  - **Multi-browser support** for Chrome, Firefox, Edge, Opera, Brave
+  - **SQLite database parsing** for reliable data extraction
+  - **Timestamp conversion** for human-readable dates
+  - **Multi-profile Firefox support** with automatic profile detection
+  - **Database lock handling** through temporary file creation
+  - **Comprehensive error handling** for corrupted or inaccessible databases
 
 ## Supported Antivirus Software
 
