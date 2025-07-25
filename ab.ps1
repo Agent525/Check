@@ -120,7 +120,7 @@ do {
 } while ($choice -notin @("1", "2", "3", "4"))
 
 # Initialize progress tracking
-$totalSections = 14
+$totalSections = 16
 $currentSection = 0
 
 function Update-Progress {
@@ -208,8 +208,51 @@ Update-Progress "Enumerating drive letters..."
 
 # Drive Letters
 Add-Section "Drive Letters"
+$ntfsDrives = @()
 Get-WmiObject Win32_LogicalDisk | ForEach-Object {
-    Add-Content -Path $findingsFile -Value "Drive $($_.DeviceID) - $($_.VolumeName) ($($_.DriveType))"
+    $fileSystem = if ($_.FileSystem) { $_.FileSystem } else { "Unknown" }
+    Add-Content -Path $findingsFile -Value "Drive $($_.DeviceID) - $($_.VolumeName) ($($_.DriveType)) - FileSystem: $fileSystem"
+    
+    # Collect NTFS drives for USN Journal checking
+    if ($_.FileSystem -eq "NTFS" -and $_.DriveType -in @(2, 3)) {  # Removable or Fixed drives
+        $ntfsDrives += $_.DeviceID.TrimEnd(':')
+    }
+}
+
+Update-Progress "Checking USN Journal..."
+
+# USN Journal Check
+Add-Section "USN Journal"
+foreach ($drive in $ntfsDrives) {
+    try {
+        # Query USN Journal information
+        $usnInfo = fsutil usn queryjournal $drive`: 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Add-Content -Path $findingsFile -Value "USN Journal for drive $drive`: Present"
+        } else {
+            Add-Content -Path $findingsFile -Value "USN Journal for drive $drive`: Not Present"
+        }
+    } catch {
+        Add-Content -Path $findingsFile -Value "USN Journal for drive $drive`: Unable to determine"
+    }
+}
+
+Update-Progress "Checking USN Journal deletion events..."
+
+# USN Journal Deletion Events (Event ID 3079)
+Add-Section "USN Journal Deletion Events"
+try {
+    $usnDeletionEvents = Get-WinEvent -FilterHashtable @{LogName='Application'; ID=3079} -MaxEvents 50 -ErrorAction SilentlyContinue
+    if ($usnDeletionEvents) {
+        Add-Content -Path $findingsFile -Value "Found USN Journal deletion events:"
+        foreach ($event in $usnDeletionEvents) {
+            Add-Content -Path $findingsFile -Value "  Time: $($event.TimeCreated) - Message: $($event.Message.Split([Environment]::NewLine)[0])"
+        }
+    } else {
+        Add-Content -Path $findingsFile -Value "No USN Journal deletion events found (Event ID 3079)"
+    }
+} catch {
+    Add-Content -Path $findingsFile -Value "Unable to query USN Journal deletion events: $($_.Exception.Message)"
 }
 
 Update-Progress "Enumerating USB devices..."
@@ -222,10 +265,34 @@ try {
     }
     
     Get-WmiObject Win32_USBHub | ForEach-Object {
-        Add-Content -Path $findingsFile -Value "USB Hub: $($_.Name) - $($_.DeviceID)"
+        $deviceId = $_.DeviceID
+        if ($deviceId -match "USB\\VID_([0-9A-F]{4})&PID_([0-9A-F]{4})") {
+            $vendorId = $matches[1]
+            $productId = $matches[2]
+            Add-Content -Path $findingsFile -Value "USB Hub: $($_.Name) - USB - Vendor ID: $vendorId Device ID: $productId"
+        } else {
+            Add-Content -Path $findingsFile -Value "USB Hub: $($_.Name) - $deviceId"
+        }
     }
 } catch {
     Add-Content -Path $findingsFile -Value "Unable to enumerate USB devices"
+}
+
+# PCIE Devices
+Add-Section "PCIE Devices"
+try {
+    Get-WmiObject Win32_PnPEntity | Where-Object { $_.DeviceID -match "PCI\\" } | ForEach-Object {
+        $deviceId = $_.DeviceID
+        if ($deviceId -match "PCI\\VEN_([0-9A-F]{4})&DEV_([0-9A-F]{4})") {
+            $vendorId = $matches[1]
+            $deviceIdNum = $matches[2]
+            Add-Content -Path $findingsFile -Value "PCIE Device: $($_.Name) - PCI - Vendor ID: $vendorId Device ID: $deviceIdNum"
+        } else {
+            Add-Content -Path $findingsFile -Value "PCIE Device: $($_.Name) - $deviceId"
+        }
+    }
+} catch {
+    Add-Content -Path $findingsFile -Value "Unable to enumerate PCIE devices"
 }
 
 Update-Progress "Checking Windows services status..."
