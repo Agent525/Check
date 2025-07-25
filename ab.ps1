@@ -228,6 +228,24 @@ try {
     Add-Content -Path $findingsFile -Value "Unable to enumerate USB devices"
 }
 
+Update-Progress "Checking Windows services status..."
+
+# Windows Services Status
+Add-Section "Windows Services Status"
+$servicesToCheck = @("DPS", "PcaSvc", "AppInfo", "EventLog", "BAM", "SysMain")
+foreach ($serviceName in $servicesToCheck) {
+    try {
+        $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+        if ($service) {
+            Add-Content -Path $findingsFile -Value "$serviceName : $($service.Status)"
+        } else {
+            Add-Content -Path $findingsFile -Value "$serviceName : Service not found"
+        }
+    } catch {
+        Add-Content -Path $findingsFile -Value "$serviceName : Unable to determine status"
+    }
+}
+
 Update-Progress "Detecting installed browsers..."
 
 # Browser Detection
