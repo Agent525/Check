@@ -731,10 +731,10 @@ try {
     Add-Content -Path $findingsFile -Value "Unable to access Recent folder: $($_.Exception.Message)"
 }
 
-Update-Progress "Checking browser history..."
+Update-Progress "Checking browser history and downloads..."
 
-# Browser History
-Add-Section "Browser History"
+# Browser History and Downloads using NirSoft tools
+Add-Section "Browser History and Downloads"
 try {
     # Define suspicious keywords and domains to filter for
     $suspiciousKeywords = @(
@@ -743,12 +743,26 @@ try {
     )
     $suspiciousDomains = @(".gg", ".cc", ".io", ".wtf", ".ru")
     
-    $allSuspiciousUrls = @()
+    # Define URLs to exclude
+    $excludeKeywords = @(
+        "googleadservices", "googlesyndication", "googletagmanager", "doubleclick",
+        "chrome-extension://", "moz-extension://", "extension://", "chrome://", "about:",
+        "edge://", "opera://", "brave://", "firefox://", "data:", "blob:"
+    )
     
     # Function to check if URL contains suspicious content
     function Test-SuspiciousUrl {
         param($Url)
+        if (-not $Url) { return $false }
+        
         $urlLower = $Url.ToLower()
+        
+        # First check if URL should be excluded
+        foreach ($exclude in $excludeKeywords) {
+            if ($urlLower.Contains($exclude)) {
+                return $false
+            }
+        }
         
         # Check for suspicious keywords
         foreach ($keyword in $suspiciousKeywords) {
@@ -767,160 +781,112 @@ try {
         return $false
     }
     
-    # Chrome History
+    # Download NirSoft tools
+    Write-Host "Downloading browser analysis tools..." -ForegroundColor Cyan
+    
     try {
-        $chromeHistoryPath = "$env:LOCALAPPDATA\Google\Chrome\User Data\Default\History"
-        if (Test-Path $chromeHistoryPath) {
-            # Copy database to temp location to avoid locks
-            $tempDb = "$env:TEMP\ChromeHistory_$(Get-Random).db"
-            Copy-Item $chromeHistoryPath $tempDb -ErrorAction SilentlyContinue
+        $historyToolPath = Join-Path $ssPath "BrowsingHistoryView.exe"
+        $downloadsToolPath = Join-Path $ssPath "BrowserDownloadsView.exe"
+        
+        Invoke-WebRequest -Uri "https://github.com/Agent525/Check/raw/main/BrowsingHistoryView.exe" -OutFile $historyToolPath -ErrorAction SilentlyContinue
+        Invoke-WebRequest -Uri "https://github.com/Agent525/Check/raw/main/BrowserDownloadsView.exe" -OutFile $downloadsToolPath -ErrorAction SilentlyContinue
+        
+        if (Test-Path $historyToolPath) {
+            # Extract browser history
+            $historyCSV = Join-Path $ssPath "browser_history.csv"
+            & $historyToolPath /scomma $historyCSV /LoadIE 1 /LoadFirefox 1 /LoadChrome 1 /LoadSafari 1 /VisitTimeFilterType 3 /VisitTimeFilterValue 30
             
-            if (Test-Path $tempDb) {
-                try {
-                    # Use System.Data.SQLite if available, otherwise fallback to basic file reading
-                    Add-Type -AssemblyName System.Data.SQLite -ErrorAction SilentlyContinue
-                    $connection = New-Object System.Data.SQLite.SQLiteConnection("Data Source=$tempDb")
-                    $connection.Open()
-                    
-                    $command = $connection.CreateCommand()
-                    $command.CommandText = "SELECT url FROM urls ORDER BY last_visit_time DESC LIMIT 500"
-                    $reader = $command.ExecuteReader()
-                    
-                    while ($reader.Read()) {
-                        $url = $reader["url"]
-                        if (Test-SuspiciousUrl $url) {
-                            $allSuspiciousUrls += "Chrome: $url"
-                        }
-                    }
-                    
-                    $reader.Close()
-                    $connection.Close()
-                } catch {
-                    # Fallback method - basic text search
-                    $content = Get-Content $tempDb -Raw -Encoding UTF8 -ErrorAction SilentlyContinue
-                    if ($content) {
-                        $urls = [regex]::Matches($content, 'https?://[^\s<>"{}|\\^`\[\]]+') | ForEach-Object { $_.Value }
-                        foreach ($url in $urls | Select-Object -First 200 -Unique) {
-                            if (Test-SuspiciousUrl $url) {
-                                $allSuspiciousUrls += "Chrome: $url"
-                            }
-                        }
-                    }
-                }
-                Remove-Item $tempDb -ErrorAction SilentlyContinue
-            }
-        }
-    } catch {
-        Add-Content -Path $findingsFile -Value "Chrome history: Unable to access"
-    }
-    
-    # Firefox History
-    try {
-        $firefoxProfilesPath = "$env:APPDATA\Mozilla\Firefox\Profiles"
-        if (Test-Path $firefoxProfilesPath) {
-            Get-ChildItem $firefoxProfilesPath -Directory | ForEach-Object {
-                $firefoxHistoryPath = Join-Path $_.FullName "places.sqlite"
-                if (Test-Path $firefoxHistoryPath) {
-                    $tempDb = "$env:TEMP\FirefoxHistory_$(Get-Random).db"
-                    Copy-Item $firefoxHistoryPath $tempDb -ErrorAction SilentlyContinue
-                    
-                    if (Test-Path $tempDb) {
-                        try {
-                            Add-Type -AssemblyName System.Data.SQLite -ErrorAction SilentlyContinue
-                            $connection = New-Object System.Data.SQLite.SQLiteConnection("Data Source=$tempDb")
-                            $connection.Open()
-                            
-                            $command = $connection.CreateCommand()
-                            $command.CommandText = "SELECT url FROM moz_places ORDER BY last_visit_date DESC LIMIT 500"
-                            $reader = $command.ExecuteReader()
-                            
-                            while ($reader.Read()) {
-                                $url = $reader["url"]
-                                if (Test-SuspiciousUrl $url) {
-                                    $allSuspiciousUrls += "Firefox: $url"
-                                }
-                            }
-                            
-                            $reader.Close()
-                            $connection.Close()
-                        } catch {
-                            # Fallback method
-                            $content = Get-Content $tempDb -Raw -Encoding UTF8 -ErrorAction SilentlyContinue
-                            if ($content) {
-                                $urls = [regex]::Matches($content, 'https?://[^\s<>"{}|\\^`\[\]]+') | ForEach-Object { $_.Value }
-                                foreach ($url in $urls | Select-Object -First 200 -Unique) {
-                                    if (Test-SuspiciousUrl $url) {
-                                        $allSuspiciousUrls += "Firefox: $url"
-                                    }
-                                }
-                            }
-                        }
-                        Remove-Item $tempDb -ErrorAction SilentlyContinue
-                    }
-                }
-            }
-        }
-    } catch {
-        Add-Content -Path $findingsFile -Value "Firefox history: Unable to access"
-    }
-    
-    # Edge History
-    try {
-        $edgeHistoryPath = "$env:LOCALAPPDATA\Microsoft\Edge\User Data\Default\History"
-        if (Test-Path $edgeHistoryPath) {
-            $tempDb = "$env:TEMP\EdgeHistory_$(Get-Random).db"
-            Copy-Item $edgeHistoryPath $tempDb -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 5  # Wait for tool to complete
             
-            if (Test-Path $tempDb) {
-                try {
-                    Add-Type -AssemblyName System.Data.SQLite -ErrorAction SilentlyContinue
-                    $connection = New-Object System.Data.SQLite.SQLiteConnection("Data Source=$tempDb")
-                    $connection.Open()
-                    
-                    $command = $connection.CreateCommand()
-                    $command.CommandText = "SELECT url FROM urls ORDER BY last_visit_time DESC LIMIT 500"
-                    $reader = $command.ExecuteReader()
-                    
-                    while ($reader.Read()) {
-                        $url = $reader["url"]
-                        if (Test-SuspiciousUrl $url) {
-                            $allSuspiciousUrls += "Edge: $url"
+            if (Test-Path $historyCSV) {
+                Add-Content -Path $findingsFile -Value "Suspicious Browser History (Last 30 days):"
+                $historyData = Import-Csv $historyCSV -ErrorAction SilentlyContinue
+                
+                if ($historyData) {
+                    $suspiciousHistory = @()
+                    foreach ($entry in $historyData) {
+                        if (Test-SuspiciousUrl $entry.URL) {
+                            $suspiciousHistory += "$($entry.'Web Browser'): $($entry.URL) - Visited: $($entry.'Visit Time')"
                         }
                     }
                     
-                    $reader.Close()
-                    $connection.Close()
-                } catch {
-                    # Fallback method
-                    $content = Get-Content $tempDb -Raw -Encoding UTF8 -ErrorAction SilentlyContinue
-                    if ($content) {
-                        $urls = [regex]::Matches($content, 'https?://[^\s<>"{}|\\^`\[\]]+') | ForEach-Object { $_.Value }
-                        foreach ($url in $urls | Select-Object -First 200 -Unique) {
-                            if (Test-SuspiciousUrl $url) {
-                                $allSuspiciousUrls += "Edge: $url"
-                            }
+                    if ($suspiciousHistory.Count -gt 0) {
+                        $suspiciousHistory | Select-Object -First 50 | ForEach-Object {
+                            Add-Content -Path $findingsFile -Value "  $_"
                         }
+                    } else {
+                        Add-Content -Path $findingsFile -Value "  No suspicious browser history found"
                     }
+                } else {
+                    Add-Content -Path $findingsFile -Value "  Unable to parse browser history data"
                 }
-                Remove-Item $tempDb -ErrorAction SilentlyContinue
+                
+                # Clean up history CSV
+                Remove-Item $historyCSV -ErrorAction SilentlyContinue
+            } else {
+                Add-Content -Path $findingsFile -Value "  Browser history extraction failed"
             }
         }
-    } catch {
-        Add-Content -Path $findingsFile -Value "Edge history: Unable to access"
-    }
-    
-    # Output results
-    if ($allSuspiciousUrls.Count -gt 0) {
-        $uniqueUrls = $allSuspiciousUrls | Sort-Object -Unique | Select-Object -First 50
-        foreach ($url in $uniqueUrls) {
-            Add-Content -Path $findingsFile -Value $url
+        
+        if (Test-Path $downloadsToolPath) {
+            # Extract browser downloads
+            $downloadsCSV = Join-Path $ssPath "browser_downloads.csv"
+            & $downloadsToolPath /scomma $downloadsCSV /DownloadTimeFilterType 6 /DownloadTimeFilterValue 30
+            
+            Start-Sleep -Seconds 5  # Wait for tool to complete
+            
+            if (Test-Path $downloadsCSV) {
+                Add-Content -Path $findingsFile -Value ""
+                Add-Content -Path $findingsFile -Value "Suspicious Browser Downloads (Last 30 days):"
+                $downloadsData = Import-Csv $downloadsCSV -ErrorAction SilentlyContinue
+                
+                if ($downloadsData) {
+                    $suspiciousDownloads = @()
+                    foreach ($entry in $downloadsData) {
+                        $downloadUrl = if ($entry.'Download URL 1') { $entry.'Download URL 1' } else { $entry.'Download URL' }
+                        $webPageUrl = if ($entry.'Web Page URL') { $entry.'Web Page URL' } else { "" }
+                        $filename = if ($entry.'Full Path Filename') { $entry.'Full Path Filename' } else { $entry.'Filename' }
+                        
+                        # Check download URL, web page URL, and filename for suspicious content
+                        if ((Test-SuspiciousUrl $downloadUrl) -or (Test-SuspiciousUrl $webPageUrl) -or 
+                            ($filename -and ($filename.ToLower() -match "(cheat|hack|loader|injector|aimbot|wallhack|macro|autoclicker)"))) {
+                            
+                            $downloadInfo = "$($entry.'Web Browser'): $filename"
+                            if ($downloadUrl) { $downloadInfo += " - URL: $downloadUrl" }
+                            if ($entry.'Start Time') { $downloadInfo += " - Downloaded: $($entry.'Start Time')" }
+                            
+                            $suspiciousDownloads += $downloadInfo
+                        }
+                    }
+                    
+                    if ($suspiciousDownloads.Count -gt 0) {
+                        $suspiciousDownloads | Select-Object -First 50 | ForEach-Object {
+                            Add-Content -Path $findingsFile -Value "  $_"
+                        }
+                    } else {
+                        Add-Content -Path $findingsFile -Value "  No suspicious browser downloads found"
+                    }
+                } else {
+                    Add-Content -Path $findingsFile -Value "  Unable to parse browser downloads data"
+                }
+                
+                # Clean up downloads CSV
+                Remove-Item $downloadsCSV -ErrorAction SilentlyContinue
+            } else {
+                Add-Content -Path $findingsFile -Value "  Browser downloads extraction failed"
+            }
         }
-    } else {
-        Add-Content -Path $findingsFile -Value "No suspicious browser history found"
+        
+        # Clean up NirSoft tools
+        if (Test-Path $historyToolPath) { Remove-Item $historyToolPath -ErrorAction SilentlyContinue }
+        if (Test-Path $downloadsToolPath) { Remove-Item $downloadsToolPath -ErrorAction SilentlyContinue }
+        
+    } catch {
+        Add-Content -Path $findingsFile -Value "Unable to download or execute browser analysis tools: $($_.Exception.Message)"
     }
     
 } catch {
-    Add-Content -Path $findingsFile -Value "Unable to access browser history: $($_.Exception.Message)"
+    Add-Content -Path $findingsFile -Value "Unable to analyze browser data: $($_.Exception.Message)"
 }
 
 Update-Progress "Checking MuiCache registry..."

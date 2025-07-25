@@ -92,7 +92,7 @@ Removes previously uploaded analysis reports from filebin.net
 | **Downloads** | Suspicious file analysis in Downloads folder with signature checking |
 | **Prefetch Files** | Windows prefetch examination |
 | **Recent Files** | Shell:recent folder analysis with cheat detection |
-| **Browser History** | **NEW:** Multi-browser history extraction (Chrome, Firefox, Edge, Opera, Brave) |
+| **Browser History and Downloads** | **ENHANCED:** Advanced browser analysis using NirSoft tools |
 | **MuiCache** | Registry execution artifacts |
 | **AppSwitched** | Application switching history |
 | **DLL OpenWithList** | DLL association analysis |
@@ -206,12 +206,29 @@ Review the generated `FindingsMM-DD.txt` file for:
   - **Digital signature verification** for executables and DLLs
 - **NEW: Browser History Extraction**
   - **Multi-browser support** for Chrome, Firefox, Edge, Opera, Brave, Opera GX
+  - **Advanced filtering** to exclude advertising and extension URLs
+  - **Keyword-based detection** for cheat-related terms (cheat, loader, injector, aimbot, etc.)
+  - **Suspicious domain filtering** (.gg, .cc, .io, .wtf, .ru domains)
+  - **Automated exclusions** for googleadservices, extensions, and browser internal URLs
   - **PowerShell-native parsing** for reliable data extraction without external dependencies
   - **URL pattern extraction** from browser database files
   - **Multi-profile Firefox support** with automatic profile detection
   - **Database lock handling** through temporary file creation
   - **Comprehensive error handling** for corrupted or inaccessible databases
-  - **Top 50 unique URLs** per browser for focused analysis
+  - **Top 50 unique suspicious URLs** per browser for focused analysis
+- **ENHANCED: Browser History and Downloads Analysis**
+  - **NirSoft BrowsingHistoryView integration** for comprehensive history extraction
+  - **NirSoft BrowserDownloadsView integration** for detailed download analysis
+  - **Multi-browser support** including Chrome, Firefox, IE, Safari, Edge, Opera, Brave
+  - **30-day historical data** extraction and analysis
+  - **Advanced filtering** for cheat-related keywords and suspicious domains
+  - **Download pattern analysis** including filename and URL inspection
+  - **Automated tool deployment** - tools downloaded, executed, and cleaned up automatically
+  - **CSV data parsing** for accurate information extraction
+  - **Suspicious domain detection** (.gg, .cc, .io, .wtf, .ru)
+  - **Keyword-based detection** (cheat, loader, injector, aimbot, etc.)
+  - **Exclusion filtering** for ads and browser extensions
+  - **Combined history and download correlation** for comprehensive browser forensics
 
 ## Supported Antivirus Software
 
