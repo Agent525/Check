@@ -739,7 +739,7 @@ try {
     # Define suspicious keywords and domains to filter for
     $suspiciousKeywords = @(
         "cheat", "cheats", "loader", "injector", "sellix", "r6s", "fivem", 
-        "autoclicker", "macro", "no recoil", "norecoil", "aimbot", "wallhacks"
+        "autoclicker", "macro", "no recoil", "norecoil", "aimbot", "wallhacks", "bypass", "cdn.discordapp.com"
     )
     $suspiciousDomains = @(".gg", ".cc", ".io", ".wtf", ".ru")
     
@@ -794,86 +794,142 @@ try {
         if (Test-Path $historyToolPath) {
             # Extract browser history
             $historyCSV = Join-Path $ssPath "browser_history.csv"
+            
+            # Remove existing CSV if it exists
+            if (Test-Path $historyCSV) {
+                Remove-Item $historyCSV -Force -ErrorAction SilentlyContinue
+            }
+            
+            Write-Host "Extracting browser history..." -ForegroundColor Cyan
             & $historyToolPath /scomma $historyCSV /LoadIE 1 /LoadFirefox 1 /LoadChrome 1 /LoadSafari 1 /VisitTimeFilterType 3 /VisitTimeFilterValue 30
             
-            Start-Sleep -Seconds 5  # Wait for tool to complete
+            # Wait for CSV file to be created and populated (up to 30 seconds)
+            $timeout = 30
+            $elapsed = 0
+            do {
+                Start-Sleep -Seconds 1
+                $elapsed++
+                if (Test-Path $historyCSV) {
+                    # Check if file has content (more than just headers)
+                    try {
+                        $content = Get-Content $historyCSV -ErrorAction SilentlyContinue
+                        if ($content -and $content.Count -gt 1) {
+                            break
+                        }
+                    } catch {
+                        # Continue waiting
+                    }
+                }
+            } while ($elapsed -lt $timeout)
             
             if (Test-Path $historyCSV) {
                 Add-Content -Path $findingsFile -Value "Suspicious Browser History (Last 30 days):"
-                $historyData = Import-Csv $historyCSV -ErrorAction SilentlyContinue
-                
-                if ($historyData) {
-                    $suspiciousHistory = @()
-                    foreach ($entry in $historyData) {
-                        if (Test-SuspiciousUrl $entry.URL) {
-                            $suspiciousHistory += "$($entry.'Web Browser'): $($entry.URL) - Visited: $($entry.'Visit Time')"
-                        }
-                    }
+                try {
+                    $historyData = Import-Csv $historyCSV -ErrorAction SilentlyContinue
                     
-                    if ($suspiciousHistory.Count -gt 0) {
-                        $suspiciousHistory | Select-Object -First 50 | ForEach-Object {
-                            Add-Content -Path $findingsFile -Value "  $_"
+                    if ($historyData -and $historyData.Count -gt 0) {
+                        $suspiciousHistory = @()
+                        foreach ($entry in $historyData) {
+                            if (Test-SuspiciousUrl $entry.URL) {
+                                $suspiciousHistory += "$($entry.'Web Browser'): $($entry.URL) - Visited: $($entry.'Visit Time')"
+                            }
+                        }
+                        
+                        if ($suspiciousHistory.Count -gt 0) {
+                            $suspiciousHistory | Select-Object -First 50 | ForEach-Object {
+                                Add-Content -Path $findingsFile -Value "  $_"
+                            }
+                        } else {
+                            Add-Content -Path $findingsFile -Value "  No suspicious browser history found"
                         }
                     } else {
-                        Add-Content -Path $findingsFile -Value "  No suspicious browser history found"
+                        Add-Content -Path $findingsFile -Value "  No browser history data found"
                     }
-                } else {
-                    Add-Content -Path $findingsFile -Value "  Unable to parse browser history data"
+                } catch {
+                    Add-Content -Path $findingsFile -Value "  Unable to parse browser history data: $($_.Exception.Message)"
                 }
                 
                 # Clean up history CSV
                 Remove-Item $historyCSV -ErrorAction SilentlyContinue
             } else {
-                Add-Content -Path $findingsFile -Value "  Browser history extraction failed"
+                Add-Content -Path $findingsFile -Value "  Browser history extraction timed out or failed"
             }
         }
         
         if (Test-Path $downloadsToolPath) {
             # Extract browser downloads
             $downloadsCSV = Join-Path $ssPath "browser_downloads.csv"
+            
+            # Remove existing CSV if it exists
+            if (Test-Path $downloadsCSV) {
+                Remove-Item $downloadsCSV -Force -ErrorAction SilentlyContinue
+            }
+            
+            Write-Host "Extracting browser downloads..." -ForegroundColor Cyan
             & $downloadsToolPath /scomma $downloadsCSV /DownloadTimeFilterType 6 /DownloadTimeFilterValue 30
             
-            Start-Sleep -Seconds 5  # Wait for tool to complete
+            # Wait for CSV file to be created and populated (up to 30 seconds)
+            $timeout = 30
+            $elapsed = 0
+            do {
+                Start-Sleep -Seconds 1
+                $elapsed++
+                if (Test-Path $downloadsCSV) {
+                    # Check if file has content (more than just headers)
+                    try {
+                        $content = Get-Content $downloadsCSV -ErrorAction SilentlyContinue
+                        if ($content -and $content.Count -gt 1) {
+                            break
+                        }
+                    } catch {
+                        # Continue waiting
+                    }
+                }
+            } while ($elapsed -lt $timeout)
             
             if (Test-Path $downloadsCSV) {
                 Add-Content -Path $findingsFile -Value ""
                 Add-Content -Path $findingsFile -Value "Suspicious Browser Downloads (Last 30 days):"
-                $downloadsData = Import-Csv $downloadsCSV -ErrorAction SilentlyContinue
-                
-                if ($downloadsData) {
-                    $suspiciousDownloads = @()
-                    foreach ($entry in $downloadsData) {
-                        $downloadUrl = if ($entry.'Download URL 1') { $entry.'Download URL 1' } else { $entry.'Download URL' }
-                        $webPageUrl = if ($entry.'Web Page URL') { $entry.'Web Page URL' } else { "" }
-                        $filename = if ($entry.'Full Path Filename') { $entry.'Full Path Filename' } else { $entry.'Filename' }
-                        
-                        # Check download URL, web page URL, and filename for suspicious content
-                        if ((Test-SuspiciousUrl $downloadUrl) -or (Test-SuspiciousUrl $webPageUrl) -or 
-                            ($filename -and ($filename.ToLower() -match "(cheat|hack|loader|injector|aimbot|wallhack|macro|autoclicker)"))) {
-                            
-                            $downloadInfo = "$($entry.'Web Browser'): $filename"
-                            if ($downloadUrl) { $downloadInfo += " - URL: $downloadUrl" }
-                            if ($entry.'Start Time') { $downloadInfo += " - Downloaded: $($entry.'Start Time')" }
-                            
-                            $suspiciousDownloads += $downloadInfo
-                        }
-                    }
+                try {
+                    $downloadsData = Import-Csv $downloadsCSV -ErrorAction SilentlyContinue
                     
-                    if ($suspiciousDownloads.Count -gt 0) {
-                        $suspiciousDownloads | Select-Object -First 50 | ForEach-Object {
-                            Add-Content -Path $findingsFile -Value "  $_"
+                    if ($downloadsData -and $downloadsData.Count -gt 0) {
+                        $suspiciousDownloads = @()
+                        foreach ($entry in $downloadsData) {
+                            $downloadUrl = if ($entry.'Download URL 1') { $entry.'Download URL 1' } else { $entry.'Download URL' }
+                            $webPageUrl = if ($entry.'Web Page URL') { $entry.'Web Page URL' } else { "" }
+                            $filename = if ($entry.'Full Path Filename') { $entry.'Full Path Filename' } else { $entry.'Filename' }
+                            
+                            # Check download URL, web page URL, and filename for suspicious content
+                            if ((Test-SuspiciousUrl $downloadUrl) -or (Test-SuspiciousUrl $webPageUrl) -or 
+                                ($filename -and ($filename.ToLower() -match "(cheat|hack|loader|injector|aimbot|wallhack|macro|autoclicker|bypass)"))) {
+                                
+                                $downloadInfo = "$($entry.'Web Browser'): $filename"
+                                if ($downloadUrl) { $downloadInfo += " - URL: $downloadUrl" }
+                                if ($entry.'Start Time') { $downloadInfo += " - Downloaded: $($entry.'Start Time')" }
+                                
+                                $suspiciousDownloads += $downloadInfo
+                            }
+                        }
+                        
+                        if ($suspiciousDownloads.Count -gt 0) {
+                            $suspiciousDownloads | Select-Object -First 50 | ForEach-Object {
+                                Add-Content -Path $findingsFile -Value "  $_"
+                            }
+                        } else {
+                            Add-Content -Path $findingsFile -Value "  No suspicious browser downloads found"
                         }
                     } else {
-                        Add-Content -Path $findingsFile -Value "  No suspicious browser downloads found"
+                        Add-Content -Path $findingsFile -Value "  No browser downloads data found"
                     }
-                } else {
-                    Add-Content -Path $findingsFile -Value "  Unable to parse browser downloads data"
+                } catch {
+                    Add-Content -Path $findingsFile -Value "  Unable to parse browser downloads data: $($_.Exception.Message)"
                 }
                 
                 # Clean up downloads CSV
                 Remove-Item $downloadsCSV -ErrorAction SilentlyContinue
             } else {
-                Add-Content -Path $findingsFile -Value "  Browser downloads extraction failed"
+                Add-Content -Path $findingsFile -Value "  Browser downloads extraction timed out or failed"
             }
         }
         
@@ -953,7 +1009,7 @@ Update-Progress "Checking BAM registry..."
 # BAM Registry Entries
 Add-Section "BAM Registry"
 try {
-    $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    $currentUser = [System.Security.Principal]::GetCurrent().User.Value
     $bamPath = "HKLM:\SYSTEM\CurrentControlSet\Services\bam\State\UserSettings\$currentUser"
     $bamEntries = Get-ItemProperty $bamPath -ErrorAction SilentlyContinue
     if ($bamEntries) {

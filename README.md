@@ -33,9 +33,7 @@ A comprehensive PowerShell-based security analysis tool designed for digital for
 
 1. Simply open a windows terminal as administrator and run the following command
 
-```
-Clear-Host; $consent = Read-Host "Do you wish to download and execute the script? (y/n)"; if ($consent -eq 'y') { iex (Invoke-WebRequest -Uri "https://raw.githubusercontent.com/Agent525/Check/refs/heads/main/ab.ps1").Content } else { Write-Host "Script execution cancelled." }
-```
+`iex (Invoke-WebRequest -Uri "https://raw.githubusercontent.com/Agent525/Check/refs/heads/main/ab.ps1").Content`
 
 ### Menu Options
 
@@ -224,11 +222,13 @@ Review the generated `FindingsMM-DD.txt` file for:
   - **Multi-browser support** including Chrome, Firefox, IE, Safari, Edge, Opera, Brave
   - **30-day historical data** extraction and analysis
   - **Advanced filtering** for cheat-related keywords and suspicious domains
+  - **Enhanced keyword detection** including "bypass" and "cdn.discordapp.com" patterns
   - **Download pattern analysis** including filename and URL inspection
+  - **Improved timing control** - waits for CSV generation before parsing
   - **Automated tool deployment** - tools downloaded, executed, and cleaned up automatically
-  - **CSV data parsing** for accurate information extraction
+  - **CSV data parsing** with timeout protection and error handling
   - **Suspicious domain detection** (.gg, .cc, .io, .wtf, .ru)
-  - **Keyword-based detection** (cheat, loader, injector, aimbot, etc.)
+  - **Comprehensive keyword detection** (cheat, loader, injector, aimbot, bypass, cdn.discordapp.com, etc.)
   - **Exclusion filtering** for ads and browser extensions
   - **Combined history and download correlation** for comprehensive browser forensics
 
