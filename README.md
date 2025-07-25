@@ -188,6 +188,13 @@ Review the generated `FindingsMM-DD.txt` file for:
 - Automated filebin management
 - Digital signature validation
 - Comprehensive error handling
+- **New: Signature-Based Cheat Detection**
+  - **Real-time database download** from GitHub repository
+  - **SHA256 hash verification** of executable files
+  - **File size matching** for enhanced accuracy
+  - **Automatic cheat identification** with naming conventions
+  - **Prioritized reporting** - detected cheats appear at the top of relevant sections
+  - **Multi-location scanning** - Downloads folder and USB drives
 
 ## Supported Antivirus Software
 
