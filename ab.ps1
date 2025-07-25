@@ -120,7 +120,7 @@ do {
 } while ($choice -notin @("1", "2", "3", "4"))
 
 # Initialize progress tracking
-$totalSections = 19
+$totalSections = 20
 $currentSection = 0
 
 function Update-Progress {
@@ -202,6 +202,51 @@ function Test-FileSignature {
         return $false
     }
     return $false
+}
+
+# Function to calculate SHA256 hash
+function Get-FileSHA256 {
+    param($FilePath)
+    try {
+        if (Test-Path $FilePath) {
+            $hash = Get-FileHash -Path $FilePath -Algorithm SHA256 -ErrorAction SilentlyContinue
+            return $hash.Hash
+        }
+    } catch {
+        return $null
+    }
+    return $null
+}
+
+# Function to download and parse cheat database
+function Get-CheatDatabase {
+    try {
+        $databaseUrl = "https://raw.githubusercontent.com/Agent525/Check/refs/heads/main/basicdb.txt"
+        $databaseContent = Invoke-WebRequest -Uri $databaseUrl -UseBasicParsing -ErrorAction SilentlyContinue
+        
+        if ($databaseContent.StatusCode -eq 200) {
+            $database = @{}
+            $lines = $databaseContent.Content -split "`n"
+            
+            foreach ($line in $lines) {
+                if ($line.Trim() -and $line.Contains(" - ") -and $line.Split(" - ").Count -eq 3) {
+                    $parts = $line.Split(" - ")
+                    $name = $parts[0].Trim()
+                    $sha256 = $parts[1].Trim()
+                    $size = $parts[2].Trim()
+                    
+                    # Create a lookup key using both hash and size
+                    $key = "$sha256|$size"
+                    $database[$key] = $name
+                }
+            }
+            return $database
+        }
+    } catch {
+        Write-Host "Warning: Unable to download cheat database: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+    return @{
+    }
 }
 
 Update-Progress "Enumerating drive letters..."
@@ -439,6 +484,85 @@ foreach ($browser in $browserPaths.Keys) {
     }
 }
 
+Update-Progress "Scanning USB drives..."
+
+# USB Drives Scan
+Add-Section "USB Drives Scan"
+try {
+    # Download cheat database
+    Write-Host "Downloading cheat database for signature checking..." -ForegroundColor Cyan
+    $cheatDatabase = Get-CheatDatabase
+    
+    # Get all USB drives
+    $usbDrives = Get-WmiObject Win32_LogicalDisk | Where-Object { $_.DriveType -eq 2 }
+    
+    if ($usbDrives) {
+        foreach ($usbDrive in $usbDrives) {
+            $driveLetter = $usbDrive.DeviceID
+            Add-Content -Path $findingsFile -Value "Scanning USB Drive: $driveLetter - $($usbDrive.VolumeName)"
+            
+            if (Test-Path $driveLetter) {
+                $usbResults = @{
+                    detectedCheats = @()
+                    exe = @()
+                    dll = @()
+                    zip = @()
+                    rar = @()
+                }
+                
+                try {
+                    Get-ChildItem $driveLetter -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Extension -match "\.(zip|rar|exe|dll)$" } | ForEach-Object {
+                        if ($_.Extension -eq ".exe") {
+                            # Calculate hash and get file size for executables
+                            $fileHash = Get-FileSHA256 $_.FullName
+                            $fileSize = $_.Length
+                            $lookupKey = "$fileHash|$fileSize"
+                            
+                            # Check against cheat database
+                            if ($cheatDatabase.ContainsKey($lookupKey)) {
+                                $cheatName = $cheatDatabase[$lookupKey]
+                                $usbResults.detectedCheats += "$($_.FullName) (*$cheatName* Detected)"
+                            } elseif (-not (Test-FileSignature $_.FullName)) {
+                                $usbResults.exe += $_.FullName
+                            }
+                        } elseif ($_.Extension -eq ".dll") {
+                            if (-not (Test-FileSignature $_.FullName)) {
+                                $usbResults.dll += $_.FullName
+                            }
+                        } elseif ($_.Extension -eq ".zip") {
+                            $usbResults.zip += $_.FullName
+                        } elseif ($_.Extension -eq ".rar") {
+                            $usbResults.rar += $_.FullName
+                        }
+                    }
+                    
+                    # Output detected cheats first
+                    $usbResults.detectedCheats | Sort-Object { $_.Length } | ForEach-Object { Add-Content -Path $findingsFile -Value "  $_" }
+                    
+                    # Then output other unsigned executables
+                    $usbResults.exe | Sort-Object { $_.Length } | ForEach-Object { Add-Content -Path $findingsFile -Value "  $_" }
+                    
+                    # Then unsigned DLLs
+                    $usbResults.dll | Sort-Object { $_.Length } | ForEach-Object { Add-Content -Path $findingsFile -Value "  $_" }
+                    
+                    # Finally output archives
+                    $usbResults.rar | Sort-Object { $_.Length } | ForEach-Object { Add-Content -Path $findingsFile -Value "  $_" }
+                    $usbResults.zip | Sort-Object { $_.Length } | ForEach-Object { Add-Content -Path $findingsFile -Value "  $_" }
+                    
+                } catch {
+                    Add-Content -Path $findingsFile -Value "  Unable to scan drive contents: $($_.Exception.Message)"
+                }
+            } else {
+                Add-Content -Path $findingsFile -Value "  Drive not accessible"
+            }
+        }
+    } else {
+        Add-Content -Path $findingsFile -Value "No USB drives detected"
+    }
+} catch {
+    Add-Content -Path $findingsFile -Value "Unable to enumerate USB drives for scanning"
+}
+
 Update-Progress "Scanning Downloads folder..."
 
 # Downloads Check
@@ -446,22 +570,47 @@ Add-Section "Downloads"
 try {
     $downloadsPath = [Environment]::GetFolderPath("UserProfile") + "\Downloads"
     if (Test-Path $downloadsPath) {
+        # Use existing cheat database if already downloaded, otherwise download it
+        if (-not $cheatDatabase) {
+            Write-Host "Downloading cheat database for signature checking..." -ForegroundColor Cyan
+            $cheatDatabase = Get-CheatDatabase
+        }
+        
         $downloadResults = @{
+            detectedCheats = @()
             exe = @()
             zip = @()
             rar = @()
         }
+        
         Get-ChildItem $downloadsPath -Recurse | Where-Object { $_.Extension -match "\.(zip|rar|exe)$" } | ForEach-Object {
-            if ($_.Extension -eq ".exe" -and -not (Test-FileSignature $_.FullName)) {
-                $downloadResults.exe += $_.FullName
+            if ($_.Extension -eq ".exe") {
+                # Calculate hash and get file size for all executables
+                $fileHash = Get-FileSHA256 $_.FullName
+                $fileSize = $_.Length
+                $lookupKey = "$fileHash|$fileSize"
+                
+                # Check against cheat database
+                if ($cheatDatabase.ContainsKey($lookupKey)) {
+                    $cheatName = $cheatDatabase[$lookupKey]
+                    $downloadResults.detectedCheats += "$($_.FullName) (*$cheatName* Detected)"
+                } elseif (-not (Test-FileSignature $_.FullName)) {
+                    $downloadResults.exe += $_.FullName
+                }
             } elseif ($_.Extension -eq ".zip") {
                 $downloadResults.zip += $_.FullName
             } elseif ($_.Extension -eq ".rar") {
                 $downloadResults.rar += $_.FullName
             }
         }
-        # Sort and output by file type
+        
+        # Output detected cheats first
+        $downloadResults.detectedCheats | Sort-Object { $_.Length } | ForEach-Object { Add-Content -Path $findingsFile -Value $_ }
+        
+        # Then output other unsigned executables
         $downloadResults.exe | Sort-Object { $_.Length } | ForEach-Object { Add-Content -Path $findingsFile -Value $_ }
+        
+        # Finally output archives
         $downloadResults.rar | Sort-Object { $_.Length } | ForEach-Object { Add-Content -Path $findingsFile -Value $_ }
         $downloadResults.zip | Sort-Object { $_.Length } | ForEach-Object { Add-Content -Path $findingsFile -Value $_ }
     }
