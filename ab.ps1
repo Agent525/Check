@@ -478,10 +478,15 @@ try {
     if (Test-Path $prefetchPath) {
         $prefetchResults = @()
         Get-ChildItem $prefetchPath -Filter "*.pf" | ForEach-Object {
-            $prefetchResults += "$($_.Name) - $($_.LastWriteTime)"
+            $prefetchResults += [PSCustomObject]@{
+                Name = $_.Name
+                LastWriteTime = $_.LastWriteTime
+                DisplayText = "$($_.Name) - $($_.LastWriteTime)"
+            }
         }
-        $prefetchResults | Sort-Object | ForEach-Object {
-            Add-Content -Path $findingsFile -Value $_
+        # Sort by LastWriteTime from oldest to newest (earliest to latest)
+        $prefetchResults | Sort-Object LastWriteTime | ForEach-Object {
+            Add-Content -Path $findingsFile -Value $_.DisplayText
         }
     }
 } catch {
