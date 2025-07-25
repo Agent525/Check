@@ -120,7 +120,7 @@ do {
 } while ($choice -notin @("1", "2", "3", "4"))
 
 # Initialize progress tracking
-$totalSections = 16
+$totalSections = 19
 $currentSection = 0
 
 function Update-Progress {
@@ -253,6 +253,111 @@ try {
     }
 } catch {
     Add-Content -Path $findingsFile -Value "Unable to query USN Journal deletion events: $($_.Exception.Message)"
+}
+
+Update-Progress "Checking Windows Defender exclusions..."
+
+# Windows Defender Exclusions
+Add-Section "Windows Defender Exclusions"
+try {
+    $exclusions = Get-MpPreference -ErrorAction SilentlyContinue
+    if ($exclusions) {
+        # Path Exclusions
+        if ($exclusions.ExclusionPath) {
+            Add-Content -Path $findingsFile -Value "Path Exclusions:"
+            $exclusions.ExclusionPath | ForEach-Object {
+                Add-Content -Path $findingsFile -Value "  $_"
+            }
+        } else {
+            Add-Content -Path $findingsFile -Value "Path Exclusions: None"
+        }
+        
+        # Extension Exclusions
+        if ($exclusions.ExclusionExtension) {
+            Add-Content -Path $findingsFile -Value "Extension Exclusions:"
+            $exclusions.ExclusionExtension | ForEach-Object {
+                Add-Content -Path $findingsFile -Value "  $_"
+            }
+        } else {
+            Add-Content -Path $findingsFile -Value "Extension Exclusions: None"
+        }
+        
+        # Process Exclusions
+        if ($exclusions.ExclusionProcess) {
+            Add-Content -Path $findingsFile -Value "Process Exclusions:"
+            $exclusions.ExclusionProcess | ForEach-Object {
+                Add-Content -Path $findingsFile -Value "  $_"
+            }
+        } else {
+            Add-Content -Path $findingsFile -Value "Process Exclusions: None"
+        }
+    } else {
+        Add-Content -Path $findingsFile -Value "Unable to retrieve Windows Defender exclusions"
+    }
+} catch {
+    Add-Content -Path $findingsFile -Value "Unable to access Windows Defender preferences: $($_.Exception.Message)"
+}
+
+Update-Progress "Checking Windows Defender alerts..."
+
+# Windows Defender Alerts
+Add-Section "Windows Defender Alerts"
+try {
+    $defenderEvents = Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-Windows Defender/Operational'} -MaxEvents 100 -ErrorAction SilentlyContinue
+    if ($defenderEvents) {
+        Add-Content -Path $findingsFile -Value "Recent Windows Defender Events:"
+        $defenderEvents | Where-Object { $_.Id -in @(1006, 1007, 1116, 1117) } | ForEach-Object {
+            $eventType = switch ($_.Id) {
+                1006 { "Malware Detected" }
+                1007 { "Action Taken" }
+                1116 { "Malware Detected (Real-time)" }
+                1117 { "Action Taken (Real-time)" }
+                default { "Other Event" }
+            }
+            Add-Content -Path $findingsFile -Value "  $($_.TimeCreated) - Event ID: $($_.Id) - $eventType"
+            if ($_.Message) {
+                $messageFirstLine = $_.Message.Split([Environment]::NewLine)[0]
+                Add-Content -Path $findingsFile -Value "    Message: $messageFirstLine"
+            }
+        }
+    } else {
+        Add-Content -Path $findingsFile -Value "No recent Windows Defender events found"
+    }
+} catch {
+    Add-Content -Path $findingsFile -Value "Unable to query Windows Defender events: $($_.Exception.Message)"
+}
+
+Update-Progress "Checking installed antivirus software..."
+
+# Antivirus Detection
+Add-Section "Installed Antivirus Software"
+$antivirusPaths = @{
+    "McAfee" = @("${env:ProgramFiles}\McAfee", "${env:ProgramFiles(x86)}\McAfee", "${env:ProgramFiles}\Common Files\McAfee")
+    "Malwarebytes" = @("${env:ProgramFiles}\Malwarebytes", "${env:ProgramFiles(x86)}\Malwarebytes")
+    "Bitdefender" = @("${env:ProgramFiles}\Bitdefender", "${env:ProgramFiles(x86)}\Bitdefender")
+    "Kaspersky" = @("${env:ProgramFiles}\Kaspersky Lab", "${env:ProgramFiles(x86)}\Kaspersky Lab", "${env:ProgramFiles}\Kaspersky Security Cloud")
+    "Norton" = @("${env:ProgramFiles}\Norton", "${env:ProgramFiles(x86)}\Norton", "${env:ProgramFiles}\NortonLifeLock")
+    "Avast" = @("${env:ProgramFiles}\AVAST Software", "${env:ProgramFiles(x86)}\AVAST Software")
+    "AVG" = @("${env:ProgramFiles}\AVG", "${env:ProgramFiles(x86)}\AVG")
+    "TotalAV" = @("${env:ProgramFiles}\TotalAV", "${env:ProgramFiles(x86)}\TotalAV")
+}
+
+$foundAntivirus = @()
+foreach ($antivirus in $antivirusPaths.Keys) {
+    foreach ($path in $antivirusPaths[$antivirus]) {
+        if (Test-Path $path) {
+            $foundAntivirus += "$antivirus found at: $path"
+            break
+        }
+    }
+}
+
+if ($foundAntivirus.Count -gt 0) {
+    $foundAntivirus | ForEach-Object {
+        Add-Content -Path $findingsFile -Value $_
+    }
+} else {
+    Add-Content -Path $findingsFile -Value "No common antivirus software detected"
 }
 
 Update-Progress "Enumerating USB devices..."
