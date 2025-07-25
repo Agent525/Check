@@ -88,8 +88,10 @@ Removes previously uploaded analysis reports from filebin.net
 | **PCIE Devices** | PCI Express hardware enumeration |
 | **Windows Services Status** | Critical service monitoring |
 | **Installed Browsers** | Browser detection and paths |
-| **Downloads** | Suspicious file analysis in Downloads folder |
+| **USB Drives Scan** | Complete USB drive content analysis with cheat detection |
+| **Downloads** | Suspicious file analysis in Downloads folder with signature checking |
 | **Prefetch Files** | Windows prefetch examination |
+| **Recent Files** | **NEW:** Shell:recent folder analysis with cheat detection |
 | **MuiCache** | Registry execution artifacts |
 | **AppSwitched** | Application switching history |
 | **DLL OpenWithList** | DLL association analysis |
@@ -137,7 +139,7 @@ PCIE Device: [Device Name] - PCI - Vendor ID: [XXXX] Device ID: [XXXX]
 ```
 
 ### Progress Tracking
-- 19 total analysis sections
+- 21 total analysis sections
 - Real-time progress indication
 - Error handling with graceful degradation
 
@@ -188,13 +190,19 @@ Review the generated `FindingsMM-DD.txt` file for:
 - Automated filebin management
 - Digital signature validation
 - Comprehensive error handling
-- **New: Signature-Based Cheat Detection**
+- **Signature-Based Cheat Detection** across multiple locations
   - **Real-time database download** from GitHub repository
   - **SHA256 hash verification** of executable files
   - **File size matching** for enhanced accuracy
   - **Automatic cheat identification** with naming conventions
   - **Prioritized reporting** - detected cheats appear at the top of relevant sections
-  - **Multi-location scanning** - Downloads folder and USB drives
+  - **Multi-location scanning** - Downloads folder, USB drives, and Recent files
+- **NEW: Recent Files Analysis**
+  - **Shell:recent folder scanning** for recently accessed files
+  - **Shortcut resolution** to identify actual file locations
+  - **Multi-format support** for .exe, .dll, .zip, .rar files
+  - **Integrated cheat detection** with signature database
+  - **Digital signature verification** for executables and DLLs
 
 ## Supported Antivirus Software
 

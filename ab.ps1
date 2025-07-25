@@ -120,7 +120,7 @@ do {
 } while ($choice -notin @("1", "2", "3", "4"))
 
 # Initialize progress tracking
-$totalSections = 20
+$totalSections = 21
 $currentSection = 0
 
 function Update-Progress {
@@ -640,6 +640,95 @@ try {
     }
 } catch {
     Add-Content -Path $findingsFile -Value "Unable to access Prefetch folder"
+}
+
+Update-Progress "Checking Recent files..."
+
+# Recent Files (shell:recent)
+Add-Section "Recent Files"
+try {
+    $recentPath = [Environment]::GetFolderPath("Recent")
+    if (Test-Path $recentPath) {
+        # Use existing cheat database if already downloaded
+        if (-not $cheatDatabase) {
+            Write-Host "Downloading cheat database for signature checking..." -ForegroundColor Cyan
+            $cheatDatabase = Get-CheatDatabase
+        }
+        
+        $recentResults = @{
+            detectedCheats = @()
+            exe = @()
+            dll = @()
+            zip = @()
+            rar = @()
+        }
+        
+        # Get all .lnk files in Recent folder and resolve their targets
+        Get-ChildItem $recentPath -Filter "*.lnk" -ErrorAction SilentlyContinue | ForEach-Object {
+            try {
+                # Create WScript.Shell object to resolve shortcut
+                $shell = New-Object -ComObject WScript.Shell
+                $shortcut = $shell.CreateShortcut($_.FullName)
+                $targetPath = $shortcut.TargetPath
+                
+                # Check if target exists and has the extensions we're looking for
+                if ($targetPath -and (Test-Path $targetPath) -and $targetPath -match "\.(exe|dll|zip|rar)$") {
+                    $targetFile = Get-Item $targetPath -ErrorAction SilentlyContinue
+                    if ($targetFile) {
+                        $extension = $targetFile.Extension.ToLower()
+                        
+                        if ($extension -eq ".exe") {
+                            # Calculate hash and get file size for executables
+                            $fileHash = Get-FileSHA256 $targetFile.FullName
+                            $fileSize = $targetFile.Length
+                            $lookupKey = "$fileHash|$fileSize"
+                            
+                            # Check against cheat database
+                            if ($cheatDatabase.ContainsKey($lookupKey)) {
+                                $cheatName = $cheatDatabase[$lookupKey]
+                                $recentResults.detectedCheats += "$($targetFile.FullName) (*$cheatName* Detected)"
+                            } elseif (-not (Test-FileSignature $targetFile.FullName)) {
+                                $recentResults.exe += $targetFile.FullName
+                            }
+                        } elseif ($extension -eq ".dll") {
+                            if (-not (Test-FileSignature $targetFile.FullName)) {
+                                $recentResults.dll += $targetFile.FullName
+                            }
+                        } elseif ($extension -eq ".zip") {
+                            $recentResults.zip += $targetFile.FullName
+                        } elseif ($extension -eq ".rar") {
+                            $recentResults.rar += $targetFile.FullName
+                        }
+                    }
+                }
+            } catch {
+                # Skip files that can't be processed
+            } finally {
+                # Clean up COM object
+                if ($shell) {
+                    [System.Runtime.Interopservices.Marshal]::ReleaseComObject($shell) | Out-Null
+                }
+            }
+        }
+        
+        # Output detected cheats first
+        $recentResults.detectedCheats | Sort-Object { $_.Length } | ForEach-Object { Add-Content -Path $findingsFile -Value $_ }
+        
+        # Then output other unsigned executables
+        $recentResults.exe | Sort-Object { $_.Length } | ForEach-Object { Add-Content -Path $findingsFile -Value $_ }
+        
+        # Then unsigned DLLs
+        $recentResults.dll | Sort-Object { $_.Length } | ForEach-Object { Add-Content -Path $findingsFile -Value $_ }
+        
+        # Finally output archives
+        $recentResults.rar | Sort-Object { $_.Length } | ForEach-Object { Add-Content -Path $findingsFile -Value $_ }
+        $recentResults.zip | Sort-Object { $_.Length } | ForEach-Object { Add-Content -Path $findingsFile -Value $_ }
+        
+    } else {
+        Add-Content -Path $findingsFile -Value "Unable to access Recent folder"
+    }
+} catch {
+    Add-Content -Path $findingsFile -Value "Unable to access Recent folder: $($_.Exception.Message)"
 }
 
 Update-Progress "Checking MuiCache registry..."
