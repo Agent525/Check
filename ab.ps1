@@ -255,6 +255,7 @@ $browserPaths = @{
     "Firefox" = @("${env:ProgramFiles}\Mozilla Firefox\firefox.exe", "${env:ProgramFiles(x86)}\Mozilla Firefox\firefox.exe")
     "Edge" = @("${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe")
     "Opera" = @("${env:ProgramFiles}\Opera\opera.exe", "${env:ProgramFiles(x86)}\Opera\opera.exe")
+    "Opera GX" = @("${env:ProgramFiles}\Opera GX\opera.exe", "${env:ProgramFiles(x86)}\Opera GX\opera.exe")
     "Brave" = @("${env:ProgramFiles}\BraveSoftware\Brave-Browser\Application\brave.exe", "${env:ProgramFiles(x86)}\BraveSoftware\Brave-Browser\Application\brave.exe")
 }
 
