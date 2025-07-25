@@ -205,12 +205,13 @@ Review the generated `FindingsMM-DD.txt` file for:
   - **Integrated cheat detection** with signature database
   - **Digital signature verification** for executables and DLLs
 - **NEW: Browser History Extraction**
-  - **Multi-browser support** for Chrome, Firefox, Edge, Opera, Brave
-  - **SQLite database parsing** for reliable data extraction
-  - **Timestamp conversion** for human-readable dates
+  - **Multi-browser support** for Chrome, Firefox, Edge, Opera, Brave, Opera GX
+  - **PowerShell-native parsing** for reliable data extraction without external dependencies
+  - **URL pattern extraction** from browser database files
   - **Multi-profile Firefox support** with automatic profile detection
   - **Database lock handling** through temporary file creation
   - **Comprehensive error handling** for corrupted or inaccessible databases
+  - **Top 50 unique URLs** per browser for focused analysis
 
 ## Supported Antivirus Software
 

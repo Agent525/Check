@@ -731,159 +731,196 @@ try {
     Add-Content -Path $findingsFile -Value "Unable to access Recent folder: $($_.Exception.Message)"
 }
 
-Update-Progress "Extracting browser history..."
+Update-Progress "Checking browser history..."
 
 # Browser History
 Add-Section "Browser History"
 try {
-    $username = $env:USERNAME
+    # Define suspicious keywords and domains to filter for
+    $suspiciousKeywords = @(
+        "cheat", "cheats", "loader", "injector", "sellix", "r6s", "fivem", 
+        "autoclicker", "macro", "no recoil", "norecoil", "aimbot", "wallhacks"
+    )
+    $suspiciousDomains = @(".gg", ".cc", ".io", ".wtf", ".ru")
     
-    # Function to extract Chrome-based browser history
-    function Get-ChromeHistory {
-        param($HistoryPath, $BrowserName)
+    $allSuspiciousUrls = @()
+    
+    # Function to check if URL contains suspicious content
+    function Test-SuspiciousUrl {
+        param($Url)
+        $urlLower = $Url.ToLower()
         
-        if (Test-Path $HistoryPath) {
-            try {
-                # Create temporary copy to avoid lock issues
-                $tempHistory = Join-Path $env:TEMP "temp_history_$((Get-Random)).db"
-                Copy-Item $HistoryPath $tempHistory -Force -ErrorAction SilentlyContinue
-                
-                # Load SQLite assembly
-                Add-Type -Path "System.Data.SQLite.dll" -ErrorAction SilentlyContinue
-                
-                # Create connection string
-                $connectionString = "Data Source=$tempHistory;Version=3;Read Only=True;"
-                $connection = New-Object System.Data.SQLite.SQLiteConnection($connectionString)
-                
-                try {
-                    $connection.Open()
-                    $command = $connection.CreateCommand()
-                    $command.CommandText = "SELECT url, title, visit_count, last_visit_time FROM urls ORDER BY last_visit_time DESC LIMIT 100"
-                    $reader = $command.ExecuteReader()
-                    
-                    $historyEntries = @()
-                    while ($reader.Read()) {
-                        # Convert Chrome timestamp (microseconds since 1601-01-01) to readable date
-                        $chromeTime = $reader["last_visit_time"]
-                        if ($chromeTime -and $chromeTime -gt 0) {
-                            $dateTime = [DateTime]::new(1601, 1, 1).AddTicks($chromeTime * 10)
-                            $historyEntries += "$($dateTime.ToString('yyyy-MM-dd HH:mm:ss')) - $($reader['url']) - $($reader['title'])"
-                        }
-                    }
-                    
-                    if ($historyEntries.Count -gt 0) {
-                        Add-Content -Path $findingsFile -Value "$BrowserName History (Last 100 entries):"
-                        $historyEntries | ForEach-Object { Add-Content -Path $findingsFile -Value "  $_" }
-                    } else {
-                        Add-Content -Path $findingsFile -Value "$BrowserName History: No entries found"
-                    }
-                    
-                } finally {
-                    if ($reader) { $reader.Close() }
-                    if ($connection) { $connection.Close() }
-                    Remove-Item $tempHistory -Force -ErrorAction SilentlyContinue
-                }
-                
-            } catch {
-                Add-Content -Path $findingsFile -Value "$BrowserName History: Unable to read database - $($_.Exception.Message)"
+        # Check for suspicious keywords
+        foreach ($keyword in $suspiciousKeywords) {
+            if ($urlLower.Contains($keyword)) {
+                return $true
             }
-        } else {
-            Add-Content -Path $findingsFile -Value "$BrowserName History: Database not found"
         }
-    }
-    
-    # Function to extract Firefox history
-    function Get-FirefoxHistory {
-        $firefoxProfilesPath = "$env:APPDATA\Mozilla\Firefox\Profiles"
-        if (Test-Path $firefoxProfilesPath) {
-            $profileFolders = Get-ChildItem $firefoxProfilesPath | Where-Object { $_.Name -match "\.default-release$|\.default$" }
-            
-            foreach ($profile in $profileFolders) {
-                $placesPath = Join-Path $profile.FullName "places.sqlite"
-                if (Test-Path $placesPath) {
-                    try {
-                        # Create temporary copy
-                        $tempPlaces = Join-Path $env:TEMP "temp_places_$((Get-Random)).db"
-                        Copy-Item $placesPath $tempPlaces -Force -ErrorAction SilentlyContinue
-                        
-                        # Load SQLite assembly
-                        Add-Type -Path "System.Data.SQLite.dll" -ErrorAction SilentlyContinue
-                        
-                        $connectionString = "Data Source=$tempPlaces;Version=3;Read Only=True;"
-                        $connection = New-Object System.Data.SQLite.SQLiteConnection($connectionString)
-                        
-                        try {
-                            $connection.Open()
-                            $command = $connection.CreateCommand()
-                            $command.CommandText = @"
-SELECT p.url, p.title, p.visit_count, h.visit_date
-FROM moz_places p
-JOIN moz_historyvisits h ON p.id = h.place_id
-ORDER BY h.visit_date DESC
-LIMIT 100
-"@
-                            $reader = $command.ExecuteReader()
-                            
-                            $historyEntries = @()
-                            while ($reader.Read()) {
-                                # Convert Firefox timestamp (microseconds since Unix epoch)
-                                $firefoxTime = $reader["visit_date"]
-                                if ($firefoxTime -and $firefoxTime -gt 0) {
-                                    $dateTime = [DateTime]::new(1970, 1, 1).AddTicks($firefoxTime * 10)
-                                    $historyEntries += "$($dateTime.ToString('yyyy-MM-dd HH:mm:ss')) - $($reader['url']) - $($reader['title'])"
-                                }
-                            }
-                            
-                            if ($historyEntries.Count -gt 0) {
-                                Add-Content -Path $findingsFile -Value "Firefox History (Profile: $($profile.Name), Last 100 entries):"
-                                $historyEntries | ForEach-Object { Add-Content -Path $findingsFile -Value "  $_" }
-                            } else {
-                                Add-Content -Path $findingsFile -Value "Firefox History (Profile: $($profile.Name)): No entries found"
-                            }
-                            
-                        } finally {
-                            if ($reader) { $reader.Close() }
-                            if ($connection) { $connection.Close() }
-                            Remove-Item $tempPlaces -Force -ErrorAction SilentlyContinue
-                        }
-                        
-                    } catch {
-                        Add-Content -Path $findingsFile -Value "Firefox History (Profile: $($profile.Name)): Unable to read database - $($_.Exception.Message)"
-                    }
-                } else {
-                    Add-Content -Path $findingsFile -Value "Firefox History (Profile: $($profile.Name)): places.sqlite not found"
-                }
+        
+        # Check for suspicious domains
+        foreach ($domain in $suspiciousDomains) {
+            if ($urlLower.Contains($domain)) {
+                return $true
             }
-        } else {
-            Add-Content -Path $findingsFile -Value "Firefox History: No Firefox profiles found"
         }
+        
+        return $false
     }
     
     # Chrome History
-    $chromeHistoryPath = "$env:LOCALAPPDATA\Google\Chrome\User Data\Default\History"
-    Get-ChromeHistory -HistoryPath $chromeHistoryPath -BrowserName "Chrome"
-    
-    # Edge History
-    $edgeHistoryPath = "$env:LOCALAPPDATA\Microsoft\Edge\User Data\Default\History"
-    Get-ChromeHistory -HistoryPath $edgeHistoryPath -BrowserName "Edge"
-    
-    # Brave History
-    $braveHistoryPath = "$env:LOCALAPPDATA\BraveSoftware\Brave-Browser\User Data\Default\History"
-    Get-ChromeHistory -HistoryPath $braveHistoryPath -BrowserName "Brave"
-    
-    # Opera History (Stable)
-    $operaStableHistoryPath = "$env:APPDATA\Opera Software\Opera Stable\History"
-    Get-ChromeHistory -HistoryPath $operaStableHistoryPath -BrowserName "Opera Stable"
-    
-    # Opera History (Legacy)
-    $operaLegacyHistoryPath = "$env:APPDATA\Opera\History"
-    Get-ChromeHistory -HistoryPath $operaLegacyHistoryPath -BrowserName "Opera Legacy"
+    try {
+        $chromeHistoryPath = "$env:LOCALAPPDATA\Google\Chrome\User Data\Default\History"
+        if (Test-Path $chromeHistoryPath) {
+            # Copy database to temp location to avoid locks
+            $tempDb = "$env:TEMP\ChromeHistory_$(Get-Random).db"
+            Copy-Item $chromeHistoryPath $tempDb -ErrorAction SilentlyContinue
+            
+            if (Test-Path $tempDb) {
+                try {
+                    # Use System.Data.SQLite if available, otherwise fallback to basic file reading
+                    Add-Type -AssemblyName System.Data.SQLite -ErrorAction SilentlyContinue
+                    $connection = New-Object System.Data.SQLite.SQLiteConnection("Data Source=$tempDb")
+                    $connection.Open()
+                    
+                    $command = $connection.CreateCommand()
+                    $command.CommandText = "SELECT url FROM urls ORDER BY last_visit_time DESC LIMIT 500"
+                    $reader = $command.ExecuteReader()
+                    
+                    while ($reader.Read()) {
+                        $url = $reader["url"]
+                        if (Test-SuspiciousUrl $url) {
+                            $allSuspiciousUrls += "Chrome: $url"
+                        }
+                    }
+                    
+                    $reader.Close()
+                    $connection.Close()
+                } catch {
+                    # Fallback method - basic text search
+                    $content = Get-Content $tempDb -Raw -Encoding UTF8 -ErrorAction SilentlyContinue
+                    if ($content) {
+                        $urls = [regex]::Matches($content, 'https?://[^\s<>"{}|\\^`\[\]]+') | ForEach-Object { $_.Value }
+                        foreach ($url in $urls | Select-Object -First 200 -Unique) {
+                            if (Test-SuspiciousUrl $url) {
+                                $allSuspiciousUrls += "Chrome: $url"
+                            }
+                        }
+                    }
+                }
+                Remove-Item $tempDb -ErrorAction SilentlyContinue
+            }
+        }
+    } catch {
+        Add-Content -Path $findingsFile -Value "Chrome history: Unable to access"
+    }
     
     # Firefox History
-    Get-FirefoxHistory
+    try {
+        $firefoxProfilesPath = "$env:APPDATA\Mozilla\Firefox\Profiles"
+        if (Test-Path $firefoxProfilesPath) {
+            Get-ChildItem $firefoxProfilesPath -Directory | ForEach-Object {
+                $firefoxHistoryPath = Join-Path $_.FullName "places.sqlite"
+                if (Test-Path $firefoxHistoryPath) {
+                    $tempDb = "$env:TEMP\FirefoxHistory_$(Get-Random).db"
+                    Copy-Item $firefoxHistoryPath $tempDb -ErrorAction SilentlyContinue
+                    
+                    if (Test-Path $tempDb) {
+                        try {
+                            Add-Type -AssemblyName System.Data.SQLite -ErrorAction SilentlyContinue
+                            $connection = New-Object System.Data.SQLite.SQLiteConnection("Data Source=$tempDb")
+                            $connection.Open()
+                            
+                            $command = $connection.CreateCommand()
+                            $command.CommandText = "SELECT url FROM moz_places ORDER BY last_visit_date DESC LIMIT 500"
+                            $reader = $command.ExecuteReader()
+                            
+                            while ($reader.Read()) {
+                                $url = $reader["url"]
+                                if (Test-SuspiciousUrl $url) {
+                                    $allSuspiciousUrls += "Firefox: $url"
+                                }
+                            }
+                            
+                            $reader.Close()
+                            $connection.Close()
+                        } catch {
+                            # Fallback method
+                            $content = Get-Content $tempDb -Raw -Encoding UTF8 -ErrorAction SilentlyContinue
+                            if ($content) {
+                                $urls = [regex]::Matches($content, 'https?://[^\s<>"{}|\\^`\[\]]+') | ForEach-Object { $_.Value }
+                                foreach ($url in $urls | Select-Object -First 200 -Unique) {
+                                    if (Test-SuspiciousUrl $url) {
+                                        $allSuspiciousUrls += "Firefox: $url"
+                                    }
+                                }
+                            }
+                        }
+                        Remove-Item $tempDb -ErrorAction SilentlyContinue
+                    }
+                }
+            }
+        }
+    } catch {
+        Add-Content -Path $findingsFile -Value "Firefox history: Unable to access"
+    }
+    
+    # Edge History
+    try {
+        $edgeHistoryPath = "$env:LOCALAPPDATA\Microsoft\Edge\User Data\Default\History"
+        if (Test-Path $edgeHistoryPath) {
+            $tempDb = "$env:TEMP\EdgeHistory_$(Get-Random).db"
+            Copy-Item $edgeHistoryPath $tempDb -ErrorAction SilentlyContinue
+            
+            if (Test-Path $tempDb) {
+                try {
+                    Add-Type -AssemblyName System.Data.SQLite -ErrorAction SilentlyContinue
+                    $connection = New-Object System.Data.SQLite.SQLiteConnection("Data Source=$tempDb")
+                    $connection.Open()
+                    
+                    $command = $connection.CreateCommand()
+                    $command.CommandText = "SELECT url FROM urls ORDER BY last_visit_time DESC LIMIT 500"
+                    $reader = $command.ExecuteReader()
+                    
+                    while ($reader.Read()) {
+                        $url = $reader["url"]
+                        if (Test-SuspiciousUrl $url) {
+                            $allSuspiciousUrls += "Edge: $url"
+                        }
+                    }
+                    
+                    $reader.Close()
+                    $connection.Close()
+                } catch {
+                    # Fallback method
+                    $content = Get-Content $tempDb -Raw -Encoding UTF8 -ErrorAction SilentlyContinue
+                    if ($content) {
+                        $urls = [regex]::Matches($content, 'https?://[^\s<>"{}|\\^`\[\]]+') | ForEach-Object { $_.Value }
+                        foreach ($url in $urls | Select-Object -First 200 -Unique) {
+                            if (Test-SuspiciousUrl $url) {
+                                $allSuspiciousUrls += "Edge: $url"
+                            }
+                        }
+                    }
+                }
+                Remove-Item $tempDb -ErrorAction SilentlyContinue
+            }
+        }
+    } catch {
+        Add-Content -Path $findingsFile -Value "Edge history: Unable to access"
+    }
+    
+    # Output results
+    if ($allSuspiciousUrls.Count -gt 0) {
+        $uniqueUrls = $allSuspiciousUrls | Sort-Object -Unique | Select-Object -First 50
+        foreach ($url in $uniqueUrls) {
+            Add-Content -Path $findingsFile -Value $url
+        }
+    } else {
+        Add-Content -Path $findingsFile -Value "No suspicious browser history found"
+    }
     
 } catch {
-    Add-Content -Path $findingsFile -Value "Unable to extract browser history: $($_.Exception.Message)"
+    Add-Content -Path $findingsFile -Value "Unable to access browser history: $($_.Exception.Message)"
 }
 
 Update-Progress "Checking MuiCache registry..."
