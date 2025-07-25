@@ -81,6 +81,9 @@ Removes previously uploaded analysis reports from filebin.net
 | **Drive Letters** | File system types and drive enumeration |
 | **USN Journal** | NTFS change journal status per drive |
 | **USN Journal Deletion Events** | Event ID 3079 monitoring |
+| **Windows Defender Exclusions** | Path, extension, and process exclusions |
+| **Windows Defender Alerts** | Recent malware detection events |
+| **Installed Antivirus Software** | Detection of common AV solutions |
 | **USB Devices** | Connected USB hardware with vendor IDs |
 | **PCIE Devices** | PCI Express hardware enumeration |
 | **Windows Services Status** | Critical service monitoring |
@@ -99,6 +102,8 @@ Removes previously uploaded analysis reports from filebin.net
 - **Digital Signature Verification**: Automatic validation of executable files
 - **Unsigned Binary Detection**: Identification of potentially suspicious executables
 - **Hardware Tampering Detection**: USB and PCIE device monitoring
+- **Windows Defender Analysis**: Exclusion and alert monitoring
+- **Antivirus Detection**: Common security software identification
 - **Evidence Preservation**: Comprehensive logging and documentation
 - **Anti-Bypass Mechanisms**: Detection of common evasion techniques
 
@@ -132,7 +137,7 @@ PCIE Device: [Device Name] - PCI - Vendor ID: [XXXX] Device ID: [XXXX]
 ```
 
 ### Progress Tracking
-- 16 total analysis sections
+- 19 total analysis sections
 - Real-time progress indication
 - Error handling with graceful degradation
 
@@ -177,10 +182,23 @@ Review the generated `FindingsMM-DD.txt` file for:
 ### Current Version Features
 - Enhanced USB/PCIE device ID parsing
 - USN Journal deletion event monitoring
+- Windows Defender exclusions and alerts analysis
+- Common antivirus software detection (McAfee, Malwarebytes, Bitdefender, Kaspersky, Norton, Avast, AVG, TotalAV)
 - Improved browser detection (Opera GX support)
 - Automated filebin management
 - Digital signature validation
 - Comprehensive error handling
+
+## Supported Antivirus Software
+
+- McAfee
+- Malwarebytes
+- Bitdefender
+- Kaspersky
+- Norton/NortonLifeLock
+- Avast
+- AVG
+- TotalAV
 
 ## Support
 
