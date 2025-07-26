@@ -1603,12 +1603,11 @@ try {
                 
                 $results += $fileDetails
                 
-                # Add to findings file based on signature status
-                if ($signatureStatus -ne "Valid") {
-                    Add-Content -Path $findingsFile -Value "$path - Signature Status: $signatureStatus"
-                }
+                # Add ALL files to findings file with their signature status
+                Add-Content -Path $findingsFile -Value "$path - Signature Status: $signatureStatus"
+                
             } catch {
-                # Skip files that can't be processed
+                # Skip files that can't be processed but still record them
                 Add-Content -Path $findingsFile -Value "$path - Error: Unable to check signature"
             }
         }
@@ -1616,45 +1615,30 @@ try {
         $stopwatch.Stop()
         $time = $stopwatch.Elapsed.Hours.ToString("00") + ":" + $stopwatch.Elapsed.Minutes.ToString("00") + ":" + $stopwatch.Elapsed.Seconds.ToString("00") + "." + $stopwatch.Elapsed.Milliseconds.ToString("000")
         
-        # Save detailed results to a separate file
-        $signatureResultsFile = Join-Path $ssPath "SignatureAnalysis$timestamp.txt"
-        
-        Add-Content -Path $signatureResultsFile -Value "Advanced Signature Analysis Results"
-        Add-Content -Path $signatureResultsFile -Value "Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
-        Add-Content -Path $signatureResultsFile -Value "Analysis Duration: $time"
-        Add-Content -Path $signatureResultsFile -Value "Total Files Analyzed: $($results.Count)"
-        Add-Content -Path $signatureResultsFile -Value ""
-        Add-Content -Path $signatureResultsFile -Value "="*80
-        Add-Content -Path $signatureResultsFile -Value ""
-        
-        # Group results by signature status
+        # Group results by signature status for summary
         $validSigned = $results | Where-Object { $_.SignatureStatus -eq "Valid" }
         $invalidSigned = $results | Where-Object { $_.SignatureStatus -ne "Valid" }
         
-        Add-Content -Path $signatureResultsFile -Value "UNSIGNED/INVALID SIGNATURE FILES ($($invalidSigned.Count) files):"
-        Add-Content -Path $signatureResultsFile -Value "="*50
-        $invalidSigned | ForEach-Object {
-            Add-Content -Path $signatureResultsFile -Value "$($_.Path) - Status: $($_.SignatureStatus)"
-        }
-        
-        Add-Content -Path $signatureResultsFile -Value ""
-        Add-Content -Path $signatureResultsFile -Value "VALIDLY SIGNED FILES ($($validSigned.Count) files):"
-        Add-Content -Path $signatureResultsFile -Value "="*50
-        $validSigned | ForEach-Object {
-            Add-Content -Path $signatureResultsFile -Value "$($_.Path) - Status: $($_.SignatureStatus)"
-        }
-        
-        # Summary in main findings file
+        # Add summary section to main findings file
         Add-Content -Path $findingsFile -Value ""
-        Add-Content -Path $findingsFile -Value "Signature Analysis Summary:"
-        Add-Content -Path $findingsFile -Value "  Total files analyzed: $($results.Count)"
-        Add-Content -Path $findingsFile -Value "  Valid signatures: $($validSigned.Count)"
-        Add-Content -Path $findingsFile -Value "  Invalid/Unsigned: $($invalidSigned.Count)"
-        Add-Content -Path $findingsFile -Value "  Analysis duration: $time"
-        Add-Content -Path $findingsFile -Value "  Detailed results saved to: SignatureAnalysis$timestamp.txt"
+        Add-Content -Path $findingsFile -Value ("=" * 50)
+        Add-Content -Path $findingsFile -Value "SIGNATURE ANALYSIS SUMMARY"
+        Add-Content -Path $findingsFile -Value ("=" * 50)
+        Add-Content -Path $findingsFile -Value "Total files analyzed: $($results.Count)"
+        Add-Content -Path $findingsFile -Value "Valid signatures: $($validSigned.Count)"
+        Add-Content -Path $findingsFile -Value "Invalid/Unsigned: $($invalidSigned.Count)"
+        Add-Content -Path $findingsFile -Value "Analysis duration: $time"
+        Add-Content -Path $findingsFile -Value ""
+        
+        if ($invalidSigned.Count -gt 0) {
+            Add-Content -Path $findingsFile -Value "FILES WITH INVALID/UNSIGNED SIGNATURES:"
+            Add-Content -Path $findingsFile -Value ("-" * 40)
+            $invalidSigned | ForEach-Object {
+                Add-Content -Path $findingsFile -Value "$($_.Path) - Status: $($_.SignatureStatus)"
+            }
+        }
         
         Write-Host "Advanced signature analysis completed in $time" -ForegroundColor Green
-        Write-Host "Detailed results saved to: $signatureResultsFile" -ForegroundColor Cyan
         
         # Clean up paths.txt file
         if (Test-Path $pathsFilePath) {
