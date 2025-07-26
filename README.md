@@ -32,7 +32,9 @@ A comprehensive PowerShell-based security analysis tool designed for digital for
 
 1. Open Windows Terminal as administrator and run:
 
-`Clear-Host; $consent = Read-Host "Do you wish to download and execute the script? (y/n)"; if ($consent -eq 'y') { iex (Invoke-WebRequest -Uri "https://raw.githubusercontent.com/Agent525/Check/refs/heads/main/ab.ps1").Content } else { Write-Host "Script execution cancelled." }`
+```
+Clear-Host; Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process; $consent = Read-Host "Do you wish to download and execute the script? (y/n)"; if ($consent -eq 'y') { iex (Invoke-WebRequest -Uri "https://raw.githubusercontent.com/Agent525/Check/refs/heads/main/ab.ps1").Content } else { Write-Host "Script execution cancelled." }
+```
 
 ### Menu Options
 
