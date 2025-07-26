@@ -743,6 +743,154 @@ try {
 
 Update-Progress "Checking Recent files..."
 
+# Last Ran Files using NirSoft LastActivityView
+Add-Section "Last Ran Files"
+try {
+    # Download NirSoft LastActivityView tool
+    Write-Host "Downloading Last Activity View tool..." -ForegroundColor Cyan
+    
+    $lastActivityToolPath = Join-Path $ssPath "LastActivityView.exe"
+    Invoke-WebRequest -Uri "https://github.com/Agent525/Check/raw/main/LastActivityView.exe" -OutFile $lastActivityToolPath -ErrorAction SilentlyContinue
+    
+    if (Test-Path $lastActivityToolPath) {
+        # Extract last activity data
+        $lastActivityCSV = Join-Path $ssPath "last_activity.csv"
+        
+        # Remove existing CSV if it exists
+        if (Test-Path $lastActivityCSV) {
+            Remove-Item $lastActivityCSV -Force -ErrorAction SilentlyContinue
+        }
+        
+        Write-Host "Extracting last activity data..." -ForegroundColor Cyan
+        & $lastActivityToolPath /scomma $lastActivityCSV
+        
+        # Wait for CSV file to be created and populated (up to 30 seconds)
+        $timeout = 30
+        $elapsed = 0
+        do {
+            Start-Sleep -Seconds 1
+            $elapsed++
+            if (Test-Path $lastActivityCSV) {
+                # Check if file has content (more than just headers)
+                try {
+                    $content = Get-Content $lastActivityCSV -ErrorAction SilentlyContinue
+                    if ($content -and $content.Count -gt 1) {
+                        break
+                    }
+                } catch {
+                    # Continue waiting
+                }
+            }
+        } while ($elapsed -lt $timeout)
+        
+        if (Test-Path $lastActivityCSV) {
+            try {
+                # Use existing cheat database if already downloaded
+                if (-not $cheatDatabase) {
+                    Write-Host "Downloading cheat database for signature checking..." -ForegroundColor Cyan
+                    $cheatDatabase = Get-CheatDatabase
+                }
+                
+                $lastActivityData = Import-Csv $lastActivityCSV -ErrorAction SilentlyContinue
+                
+                if ($lastActivityData -and $lastActivityData.Count -gt 0) {
+                    $lastActivityResults = @{
+                        detectedCheats = @()
+                        exe = @()
+                    }
+                    
+                    foreach ($entry in $lastActivityData) {
+                        # Focus on "Run EXE" activities and executable files
+                        $actionType = if ($entry.'Action Type') { $entry.'Action Type' } else { $entry.'Type' }
+                        $filename = if ($entry.'Filename') { $entry.'Filename' } else { $entry.'File' }
+                        $description = if ($entry.'Description') { $entry.'Description' } else { "" }
+                        
+                        # Check if this is a run executable activity or executable file
+                        if (($actionType -and $actionType.ToLower().Contains("run")) -or 
+                            ($filename -and $filename.ToLower().EndsWith(".exe")) -or
+                            ($description -and $description.ToLower().Contains("exe"))) {
+                            
+                            # Extract executable path if available
+                            $exePath = $filename
+                            if (-not $exePath -and $description) {
+                                # Try to extract path from description
+                                if ($description -match '([A-Z]:\\[^"<>|*?]+\.exe)') {
+                                    $exePath = $matches[1]
+                                }
+                            }
+                            
+                            if ($exePath -and $exePath.ToLower().EndsWith(".exe")) {
+                                # Check if file still exists for hash calculation
+                                if (Test-Path $exePath) {
+                                    $fileHash = Get-FileSHA256 $exePath
+                                    $fileSize = (Get-Item $exePath -ErrorAction SilentlyContinue).Length
+                                    $lookupKey = "$fileHash|$fileSize"
+                                    
+                                    # Check against cheat database
+                                    if ($cheatDatabase.ContainsKey($lookupKey)) {
+                                        $cheatName = $cheatDatabase[$lookupKey]
+                                        $timestamp = if ($entry.'Date/Time') { $entry.'Date/Time' } else { $entry.'Time' }
+                                        $lastActivityResults.detectedCheats += "$exePath (*$cheatName* Detected) - Last Activity: $timestamp"
+                                    } elseif (-not (Test-FileSignature $exePath)) {
+                                        $timestamp = if ($entry.'Date/Time') { $entry.'Date/Time' } else { $entry.'Time' }
+                                        $lastActivityResults.exe += "$exePath - Last Activity: $timestamp"
+                                    }
+                                } else {
+                                    # File doesn't exist anymore, but still record the activity
+                                    $timestamp = if ($entry.'Date/Time') { $entry.'Date/Time' } else { $entry.'Time' }
+                                    $lastActivityResults.exe += "$exePath (File Not Found) - Last Activity: $timestamp"
+                                }
+                            }
+                        }
+                    }
+                    
+                    # Output detected cheats first
+                    $lastActivityResults.detectedCheats | Sort-Object | Select-Object -First 50 | ForEach-Object {
+                        Add-Content -Path $findingsFile -Value $_
+                    }
+                    
+                    # Then output other executables
+                    $lastActivityResults.exe | Sort-Object | Select-Object -First 50 | ForEach-Object {
+                        Add-Content -Path $findingsFile -Value $_
+                    }
+                    
+                    if ($lastActivityResults.detectedCheats.Count -eq 0 -and $lastActivityResults.exe.Count -eq 0) {
+                        Add-Content -Path $findingsFile -Value "No recent executable activity found"
+                    }
+                } else {
+                    Add-Content -Path $findingsFile -Value "No last activity data found"
+                }
+            } catch {
+                Add-Content -Path $findingsFile -Value "Unable to parse last activity data: $($_.Exception.Message)"
+            }
+            
+            # Clean up CSV file
+            Remove-Item $lastActivityCSV -ErrorAction SilentlyContinue
+        } else {
+            Add-Content -Path $findingsFile -Value "Last activity extraction timed out or failed"
+        }
+        
+        # Clean up the tool
+        Remove-Item $lastActivityToolPath -ErrorAction SilentlyContinue
+    } else {
+        Add-Content -Path $findingsFile -Value "Unable to download LastActivityView tool"
+    }
+} catch {
+    Add-Content -Path $findingsFile -Value "Unable to analyze last activity data: $($_.Exception.Message)"
+    
+    # Cleanup on error
+    $cleanupFiles = @(
+        (Join-Path $ssPath "last_activity.csv"),
+        (Join-Path $ssPath "LastActivityView.exe")
+    )
+    
+    foreach ($file in $cleanupFiles) {
+        if (Test-Path $file) {
+            Remove-Item $file -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 # Recent Files (shell:recent)
 Add-Section "Recent Files"
 try {
