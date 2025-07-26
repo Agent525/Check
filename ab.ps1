@@ -762,7 +762,7 @@ try {
         }
         
         Write-Host "Extracting last activity data..." -ForegroundColor Cyan
-        & $lastActivityToolPath /scomma $lastActivityCSV
+        & $lastActivityToolPath /scomma $lastActivityCSV /sort "~Date/Time"
         
         # Wait for CSV file to be created and populated (up to 30 seconds)
         $timeout = 30
@@ -800,57 +800,93 @@ try {
                     }
                     
                     foreach ($entry in $lastActivityData) {
-                        # Focus on "Run EXE" activities and executable files
-                        $actionType = if ($entry.'Action Type') { $entry.'Action Type' } else { $entry.'Type' }
-                        $filename = if ($entry.'Filename') { $entry.'Filename' } else { $entry.'File' }
-                        $description = if ($entry.'Description') { $entry.'Description' } else { "" }
+                        # Get all possible field names for different columns
+                        $actionType = if ($entry.'Action Type') { $entry.'Action Type' } elseif ($entry.'Type') { $entry.'Type' } else { "" }
+                        $filename = if ($entry.'Filename') { $entry.'Filename' } elseif ($entry.'File') { $entry.'File' } elseif ($entry.'Path') { $entry.'Path' } else { "" }
+                        $description = if ($entry.'Description') { $entry.'Description' } elseif ($entry.'Details') { $entry.'Details' } else { "" }
+                        $timestamp = if ($entry.'Date/Time') { $entry.'Date/Time' } elseif ($entry.'Time') { $entry.'Time' } elseif ($entry.'DateTime') { $entry.'DateTime' } else { "Unknown" }
                         
-                        # Check if this is a run executable activity or executable file
-                        if (($actionType -and $actionType.ToLower().Contains("run")) -or 
-                            ($filename -and $filename.ToLower().EndsWith(".exe")) -or
-                            ($description -and $description.ToLower().Contains("exe"))) {
+                        # Look for executable paths in multiple fields
+                        $executablePaths = @()
+                        
+                        # Check filename field
+                        if ($filename -and $filename.ToLower().EndsWith(".exe")) {
+                            $executablePaths += $filename
+                        }
+                        
+                        # Check description for paths
+                        if ($description) {
+                            # Look for various executable path patterns
+                            $pathPatterns = @(
+                                '([A-Z]:\\[^"<>|*?\r\n]+\.exe)',  # Standard Windows path
+                                '"([^"]+\.exe)"',                 # Quoted paths
+                                '([^\s]+\.exe)',                  # Simple exe paths
+                                'File:\s*([^\s,]+\.exe)',         # File: prefix
+                                'Path:\s*([^\s,]+\.exe)'          # Path: prefix
+                            )
                             
-                            # Extract executable path if available
-                            $exePath = $filename
-                            if (-not $exePath -and $description) {
-                                # Try to extract path from description
-                                if ($description -match '([A-Z]:\\[^"<>|*?]+\.exe)') {
-                                    $exePath = $matches[1]
+                            foreach ($pattern in $pathPatterns) {
+                                if ($description -match $pattern) {
+                                    $extractedPath = $matches[1]
+                                    if ($extractedPath -and $extractedPath.ToLower().EndsWith(".exe")) {
+                                        $executablePaths += $extractedPath
+                                    }
                                 }
                             }
+                        }
+                        
+                        # Process all found executable paths
+                        foreach ($exePath in $executablePaths) {
+                            # Clean up the path
+                            $exePath = $exePath.Trim('"').Trim()
                             
-                            if ($exePath -and $exePath.ToLower().EndsWith(".exe")) {
-                                # Check if file still exists for hash calculation
-                                if (Test-Path $exePath) {
+                            # Skip if path is too short or invalid
+                            if ($exePath.Length -lt 5 -or -not $exePath.ToLower().EndsWith(".exe")) {
+                                continue
+                            }
+                            
+                            # Check if file still exists for hash calculation
+                            if (Test-Path $exePath) {
+                                try {
                                     $fileHash = Get-FileSHA256 $exePath
                                     $fileSize = (Get-Item $exePath -ErrorAction SilentlyContinue).Length
-                                    $lookupKey = "$fileHash|$fileSize"
                                     
-                                    # Check against cheat database
-                                    if ($cheatDatabase.ContainsKey($lookupKey)) {
-                                        $cheatName = $cheatDatabase[$lookupKey]
-                                        $timestamp = if ($entry.'Date/Time') { $entry.'Date/Time' } else { $entry.'Time' }
-                                        $lastActivityResults.detectedCheats += "$exePath (*$cheatName* Detected) - Last Activity: $timestamp"
-                                    } elseif (-not (Test-FileSignature $exePath)) {
-                                        $timestamp = if ($entry.'Date/Time') { $entry.'Date/Time' } else { $entry.'Time' }
+                                    if ($fileHash -and $fileSize) {
+                                        $lookupKey = "$fileHash|$fileSize"
+                                        
+                                        # Check against cheat database
+                                        if ($cheatDatabase.ContainsKey($lookupKey)) {
+                                            $cheatName = $cheatDatabase[$lookupKey]
+                                            $lastActivityResults.detectedCheats += "$exePath (*$cheatName* Detected) - Last Activity: $timestamp"
+                                        } elseif (-not (Test-FileSignature $exePath)) {
+                                            $lastActivityResults.exe += "$exePath - Last Activity: $timestamp"
+                                        }
+                                    } else {
+                                        # Couldn't get hash/size but file exists
                                         $lastActivityResults.exe += "$exePath - Last Activity: $timestamp"
                                     }
-                                } else {
-                                    # File doesn't exist anymore, but still record the activity
-                                    $timestamp = if ($entry.'Date/Time') { $entry.'Date/Time' } else { $entry.'Time' }
-                                    $lastActivityResults.exe += "$exePath (File Not Found) - Last Activity: $timestamp"
+                                } catch {
+                                    # Error processing file
+                                    $lastActivityResults.exe += "$exePath (Processing Error) - Last Activity: $timestamp"
                                 }
+                            } else {
+                                # File doesn't exist anymore, but still record the activity
+                                $lastActivityResults.exe += "$exePath (File Not Found) - Last Activity: $timestamp"
                             }
                         }
                     }
                     
+                    # Remove duplicates and sort
+                    $lastActivityResults.detectedCheats = $lastActivityResults.detectedCheats | Sort-Object -Unique
+                    $lastActivityResults.exe = $lastActivityResults.exe | Sort-Object -Unique
+                    
                     # Output detected cheats first
-                    $lastActivityResults.detectedCheats | Sort-Object | Select-Object -First 50 | ForEach-Object {
+                    $lastActivityResults.detectedCheats | Select-Object -First 100 | ForEach-Object {
                         Add-Content -Path $findingsFile -Value $_
                     }
                     
                     # Then output other executables
-                    $lastActivityResults.exe | Sort-Object | Select-Object -First 50 | ForEach-Object {
+                    $lastActivityResults.exe | Select-Object -First 100 | ForEach-Object {
                         Add-Content -Path $findingsFile -Value $_
                     }
                     
@@ -863,30 +899,34 @@ try {
             } catch {
                 Add-Content -Path $findingsFile -Value "Unable to parse last activity data: $($_.Exception.Message)"
             }
-            
-            # Clean up CSV file
-            Remove-Item $lastActivityCSV -ErrorAction SilentlyContinue
         } else {
             Add-Content -Path $findingsFile -Value "Last activity extraction timed out or failed"
         }
-        
-        # Clean up the tool
-        Remove-Item $lastActivityToolPath -ErrorAction SilentlyContinue
     } else {
         Add-Content -Path $findingsFile -Value "Unable to download LastActivityView tool"
     }
 } catch {
     Add-Content -Path $findingsFile -Value "Unable to analyze last activity data: $($_.Exception.Message)"
-    
-    # Cleanup on error
-    $cleanupFiles = @(
+} finally {
+    # Comprehensive cleanup for LastActivityView
+    $lastActivityCleanupFiles = @(
         (Join-Path $ssPath "last_activity.csv"),
         (Join-Path $ssPath "LastActivityView.exe")
     )
     
-    foreach ($file in $cleanupFiles) {
+    foreach ($file in $lastActivityCleanupFiles) {
         if (Test-Path $file) {
-            Remove-Item $file -Force -ErrorAction SilentlyContinue
+            try {
+                Remove-Item $file -Force -ErrorAction SilentlyContinue
+                Start-Sleep -Milliseconds 100  # Brief pause to ensure deletion
+            } catch {
+                # Try alternative cleanup method
+                try {
+                    [System.IO.File]::Delete($file)
+                } catch {
+                    # Silent fail - file will be cleaned up later
+                }
+            }
         }
     }
 }
@@ -992,7 +1032,7 @@ try {
         "ring-1.io", "skript.gg", "tzproject.com", "hxcheats.tech", "skycheats.com",
         "wh-satano.ru", "susano.re", "vape.gg", "neverlack.in", "liquidbounce.net"
     )
-    $suspiciousDomains = @(".gg", ".cc", ".io", ".wtf", ".ru")
+    $suspiciousDomains = @(".gg", ".cc", ".io", ".wtf", ".ru", ".xyz")
     
     # Define URLs to exclude
     $excludeKeywords = @(
@@ -1194,39 +1234,91 @@ try {
             }
         }
         
-        # Clean up NirSoft tools
-        if (Test-Path $historyToolPath) { Remove-Item $historyToolPath -ErrorAction SilentlyContinue }
-        if (Test-Path $downloadsToolPath) { Remove-Item $downloadsToolPath -ErrorAction SilentlyContinue }
-        
-        # Additional cleanup - ensure all temporary files are removed
-        $tempFiles = @(
-            (Join-Path $ssPath "browser_history.csv"),
-            (Join-Path $ssPath "browser_downloads.csv"),
-            (Join-Path $ssPath "BrowsingHistoryView.exe"),
-            (Join-Path $ssPath "BrowserDownloadsView.exe")
-        )
-        
-        foreach ($tempFile in $tempFiles) {
-            if (Test-Path $tempFile) {
-                Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
+        # Clean up NirSoft tools and files with enhanced deletion
+        try {
+            # Force stop any running processes first
+            Get-Process | Where-Object { $_.ProcessName -match "BrowsingHistoryView|BrowserDownloadsView" } | Stop-Process -Force -ErrorAction SilentlyContinue
+            
+            # Wait a moment for processes to fully terminate
+            Start-Sleep -Seconds 2
+            
+            # Enhanced cleanup with multiple attempts
+            $browserCleanupFiles = @(
+                (Join-Path $ssPath "browser_history.csv"),
+                (Join-Path $ssPath "browser_downloads.csv"),
+                (Join-Path $ssPath "BrowsingHistoryView.exe"),
+                (Join-Path $ssPath "BrowserDownloadsView.exe")
+            )
+            
+            foreach ($tempFile in $browserCleanupFiles) {
+                if (Test-Path $tempFile) {
+                    $attempts = 0
+                    $maxAttempts = 3
+                    
+                    while ($attempts -lt $maxAttempts -and (Test-Path $tempFile)) {
+                        try {
+                            Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
+                            Start-Sleep -Milliseconds 200
+                        } catch {
+                            # Try alternative deletion method
+                            try {
+                                [System.IO.File]::Delete($tempFile)
+                            } catch {
+                                # If still failing, try to move and delete
+                                try {
+                                    $tempName = $tempFile + ".tmp" + (Get-Random)
+                                    Move-Item $tempFile $tempName -Force -ErrorAction SilentlyContinue
+                                    Remove-Item $tempName -Force -ErrorAction SilentlyContinue
+                                } catch {
+                                    # Final attempt with .NET method
+                                    try {
+                                        [System.GC]::Collect()
+                                        [System.GC]::WaitForPendingFinalizers()
+                                        [System.IO.File]::Delete($tempFile)
+                                    } catch {
+                                        # Silent fail - will be cleaned up on next run
+                                    }
+                                }
+                            }
+                        }
+                        $attempts++
+                        if ($attempts -lt $maxAttempts) {
+                            Start-Sleep -Milliseconds 500
+                        }
+                    }
+                }
             }
+        } catch {
+            # Silent cleanup failure - files may persist but won't affect functionality
         }
         
     } catch {
         Add-Content -Path $findingsFile -Value "Unable to download or execute browser analysis tools: $($_.Exception.Message)"
         
-        # Cleanup on error as well
-        $tempFiles = @(
-            (Join-Path $ssPath "browser_history.csv"),
-            (Join-Path $ssPath "browser_downloads.csv"),
-            (Join-Path $ssPath "BrowsingHistoryView.exe"),
-            (Join-Path $ssPath "BrowserDownloadsView.exe")
-        )
-        
-        foreach ($tempFile in $tempFiles) {
-            if (Test-Path $tempFile) {
-                Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
+        # Enhanced cleanup on error as well
+        try {
+            Get-Process | Where-Object { $_.ProcessName -match "BrowsingHistoryView|BrowserDownloadsView" } | Stop-Process -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 1
+            
+            $browserCleanupFiles = @(
+                (Join-Path $ssPath "browser_history.csv"),
+                (Join-Path $ssPath "browser_downloads.csv"),
+                (Join-Path $ssPath "BrowsingHistoryView.exe"),
+                (Join-Path $ssPath "BrowserDownloadsView.exe")
+            )
+            
+            foreach ($tempFile in $browserCleanupFiles) {
+                if (Test-Path $tempFile) {
+                    try {
+                        Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
+                        [System.IO.File]::Delete($tempFile)
+                    } catch {
+                        # Silent fail
+                    }
+                }
             }
+        } catch {
+            # Silent cleanup failure
         }
     }
     
