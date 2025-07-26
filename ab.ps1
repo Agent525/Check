@@ -739,7 +739,11 @@ try {
     # Define suspicious keywords and domains to filter for
     $suspiciousKeywords = @(
         "cheat", "cheats", "loader", "injector", "sellix", "r6s", "fivem", 
-        "autoclicker", "macro", "no recoil", "norecoil", "aimbot", "wallhacks", "bypass", "cdn.discordapp.com"
+        "autoclicker", "macro", "no recoil", "norecoil", "aimbot", "wallhacks", "bypass", "cdn.discordapp.com",
+        "myloader.cc", "perc.gg", "ssz.gg", "time2win.net", "qlmshop.com", "420-services.net",
+        "eulencheats.com", "lmarket.net", "battlelog.co", "cheatarmy.com", "cosmocheats.com",
+        "ring-1.io", "skript.gg", "tzproject.com", "hxcheats.tech", "skycheats.com",
+        "wh-satano.ru", "susano.re", "vape.gg", "neverlack.in", "liquidbounce.net"
     )
     $suspiciousDomains = @(".gg", ".cc", ".io", ".wtf", ".ru")
     
@@ -747,7 +751,8 @@ try {
     $excludeKeywords = @(
         "googleadservices", "googlesyndication", "googletagmanager", "doubleclick",
         "chrome-extension://", "moz-extension://", "extension://", "chrome://", "about:",
-        "edge://", "opera://", "brave://", "firefox://", "data:", "blob:"
+        "edge://", "opera://", "brave://", "firefox://", "data:", "blob:",
+        "accounts.google.com", "awstrack.me"
     )
     
     # Function to check if URL contains suspicious content
@@ -904,7 +909,16 @@ try {
                             if ((Test-SuspiciousUrl $downloadUrl) -or (Test-SuspiciousUrl $webPageUrl) -or 
                                 ($filename -and ($filename.ToLower() -match "(cheat|hack|loader|injector|aimbot|wallhack|macro|autoclicker|bypass)"))) {
                                 
-                                $downloadInfo = "$($entry.'Web Browser'): $filename"
+                                # Clean up Discord CDN filenames - remove everything after file extension
+                                $cleanFilename = $filename
+                                if ($downloadUrl -and $downloadUrl.ToLower().Contains("cdn.discordapp.com")) {
+                                    # Extract just the filename with extension, remove query parameters and extra data
+                                    if ($filename -match '([^\\\/]+\.[a-zA-Z0-9]+)') {
+                                        $cleanFilename = $matches[1]
+                                    }
+                                }
+                                
+                                $downloadInfo = "$($entry.'Web Browser'): $cleanFilename"
                                 if ($downloadUrl) { $downloadInfo += " - URL: $downloadUrl" }
                                 if ($entry.'Start Time') { $downloadInfo += " - Downloaded: $($entry.'Start Time')" }
                                 
@@ -937,8 +951,36 @@ try {
         if (Test-Path $historyToolPath) { Remove-Item $historyToolPath -ErrorAction SilentlyContinue }
         if (Test-Path $downloadsToolPath) { Remove-Item $downloadsToolPath -ErrorAction SilentlyContinue }
         
+        # Additional cleanup - ensure all temporary files are removed
+        $tempFiles = @(
+            (Join-Path $ssPath "browser_history.csv"),
+            (Join-Path $ssPath "browser_downloads.csv"),
+            (Join-Path $ssPath "BrowsingHistoryView.exe"),
+            (Join-Path $ssPath "BrowserDownloadsView.exe")
+        )
+        
+        foreach ($tempFile in $tempFiles) {
+            if (Test-Path $tempFile) {
+                Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
+            }
+        }
+        
     } catch {
         Add-Content -Path $findingsFile -Value "Unable to download or execute browser analysis tools: $($_.Exception.Message)"
+        
+        # Cleanup on error as well
+        $tempFiles = @(
+            (Join-Path $ssPath "browser_history.csv"),
+            (Join-Path $ssPath "browser_downloads.csv"),
+            (Join-Path $ssPath "BrowsingHistoryView.exe"),
+            (Join-Path $ssPath "BrowserDownloadsView.exe")
+        )
+        
+        foreach ($tempFile in $tempFiles) {
+            if (Test-Path $tempFile) {
+                Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
+            }
+        }
     }
     
 } catch {

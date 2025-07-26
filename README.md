@@ -229,7 +229,8 @@ Review the generated `FindingsMM-DD.txt` file for:
   - **CSV data parsing** with timeout protection and error handling
   - **Suspicious domain detection** (.gg, .cc, .io, .wtf, .ru)
   - **Comprehensive keyword detection** (cheat, loader, injector, aimbot, bypass, cdn.discordapp.com, etc.)
-  - **Exclusion filtering** for ads and browser extensions
+  - **Enhanced exclusion filtering** for ads, browser extensions, Google accounts, and tracking domains
+  - **Clean Discord CDN display** - simplified filename presentation for Discord downloads
   - **Combined history and download correlation** for comprehensive browser forensics
 
 ## Supported Antivirus Software
