@@ -224,6 +224,7 @@ Review the generated `FindingsMM-DD.txt` file for:
   - **Advanced filtering** for cheat-related keywords and suspicious domains
   - **Enhanced keyword detection** including "bypass" and "cdn.discordapp.com" patterns
   - **Download pattern analysis** including filename and URL inspection
+  - **Improved timing control** - waits for CSV generation before parsing
   - **Automated tool deployment** - tools downloaded, executed, and cleaned up automatically
   - **CSV data parsing** with timeout protection and error handling
   - **Suspicious domain detection** (.gg, .cc, .io, .wtf, .ru)

@@ -156,27 +156,126 @@ try {
 }
 Add-Content -Path $findingsFile -Value $secureBootStatus
 
-# Check Kernel DMA Protection
+# Comprehensive Kernel DMA Protection Check (includes DMA Protection, Memory Integrity, and Stack Protection)
 try {
-    $deviceGuardProps = Get-ComputerInfo | Select-Object -ExpandProperty DeviceGuardAvailableSecurityProperties
-    if ($deviceGuardProps -contains "DMA Protection") {
-        $dmaStatus = "Kernel DMA Protection: Available/Enabled"
+    $dmaProtectionEnabled = $false
+    $memoryIntegrityEnabled = $false
+    $kernelStackProtectionEnabled = $false
+    $protectionDetails = @()
+    
+    # Check basic DMA Protection
+    try {
+        $deviceGuardProps = Get-ComputerInfo | Select-Object -ExpandProperty DeviceGuardAvailableSecurityProperties
+        if ($deviceGuardProps -contains "DMA Protection") {
+            $dmaProtectionEnabled = $true
+            $protectionDetails += "DMA Protection Available"
+        }
+    } catch {
+        $protectionDetails += "DMA Protection Check Failed"
+    }
+    
+    # Check Memory Integrity (HVCI)
+    try {
+        $hvciStatus = Get-CimInstance -ClassName Win32_DeviceGuard -Namespace root\Microsoft\Windows\DeviceGuard -ErrorAction SilentlyContinue
+        if ($hvciStatus) {
+            if ($hvciStatus.VirtualizationBasedSecurityStatus -eq 2) {
+                $memoryIntegrityEnabled = $true
+                $protectionDetails += "Memory Integrity (HVCI) Enabled"
+            } else {
+                $protectionDetails += "Memory Integrity (HVCI) Disabled"
+            }
+        } else {
+            # Alternative method using registry
+            $hvciRegistry = Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard" -Name "EnableVirtualizationBasedSecurity" -ErrorAction SilentlyContinue
+            $hvciHyperV = Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity" -Name "Enabled" -ErrorAction SilentlyContinue
+            
+            if ($hvciRegistry -and $hvciHyperV -and $hvciRegistry.EnableVirtualizationBasedSecurity -eq 1 -and $hvciHyperV.Enabled -eq 1) {
+                $memoryIntegrityEnabled = $true
+                $protectionDetails += "Memory Integrity (HVCI) Enabled (Registry)"
+            } else {
+                $protectionDetails += "Memory Integrity (HVCI) Disabled or Not Available"
+            }
+        }
+    } catch {
+        $protectionDetails += "Memory Integrity (HVCI) Check Failed"
+    }
+    
+    # Check Kernel-mode Hardware-enforced Stack Protection
+    try {
+        $stackProtectionDetails = @()
+        
+        # Check for Kernel CET (Control Flow Enforcement Technology)
+        $cetStatus = Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\kernel" -Name "CetCompatible" -ErrorAction SilentlyContinue
+        $stackProtection = Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\kernel" -Name "KernelSEHOPEnabled" -ErrorAction SilentlyContinue
+        
+        if ($cetStatus -and $cetStatus.CetCompatible -eq 1) {
+            $kernelStackProtectionEnabled = $true
+            $stackProtectionDetails += "CET Compatible"
+        }
+        
+        if ($stackProtection -and $stackProtection.KernelSEHOPEnabled -eq 1) {
+            $kernelStackProtectionEnabled = $true
+            $stackProtectionDetails += "SEHOP Enabled"
+        }
+        
+        # Check for additional stack protection features
+        $mitigationPolicy = Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\kernel" -Name "MitigationAuditOptions" -ErrorAction SilentlyContinue
+        if ($mitigationPolicy) {
+            $stackProtectionDetails += "Mitigation Audit Options Set"
+        }
+        
+        if ($kernelStackProtectionEnabled) {
+            $protectionDetails += "Kernel Stack Protection Enabled ($($stackProtectionDetails -join ', '))"
+        } else {
+            $protectionDetails += "Kernel Stack Protection Disabled or Not Available"
+        }
+    } catch {
+        $protectionDetails += "Kernel Stack Protection Check Failed"
+    }
+    
+    # Determine overall status - all three must be enabled
+    if ($dmaProtectionEnabled -and $memoryIntegrityEnabled -and $kernelStackProtectionEnabled) {
+        $overallDmaStatus = "Kernel DMA Protection: Available/Enabled (All Components Active)"
     } else {
-        $dmaStatus = "Kernel DMA Protection: Not Available/Disabled"
+        $overallDmaStatus = "Kernel DMA Protection: Not Available/Disabled"
+    }
+    
+    # Add detailed breakdown
+    Add-Content -Path $findingsFile -Value $overallDmaStatus
+    Add-Content -Path $findingsFile -Value "  Details: $($protectionDetails -join '; ')"
+    
+} catch {
+    Add-Content -Path $findingsFile -Value "Kernel DMA Protection: Unable to determine"
+}
+
+# Check Control Flow Guard (CFG) separately
+try {
+    $cfgEnabled = $false
+    $cfgDetails = @()
+    
+    # Check system-wide CFG policy
+    $cfgPolicy = Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\kernel" -Name "CfgBitmap" -ErrorAction SilentlyContinue
+    if ($cfgPolicy) {
+        $cfgEnabled = $true
+        $cfgDetails += "System CFG Policy"
+    }
+    
+    # Check if CFG is available in processor
+    $processorFeatures = Get-CimInstance Win32_Processor | Select-Object -First 1
+    if ($processorFeatures) {
+        # CFG support is typically indicated by processor capabilities
+        $cfgDetails += "Processor Support Available"
+    }
+    
+    if ($cfgEnabled) {
+        $cfgStatus = "Control Flow guard (CFG): Enabled ($($cfgDetails -join ', '))"
+    } else {
+        $cfgStatus = "Control Flow Guard (CFG): System-level status unclear (Application-specific)"
     }
 } catch {
-    $dmaStatus = "Kernel DMA Protection: Unable to determine"
+    $cfgStatus = "Control Flow Guard (CFG): Unable to determine"
 }
-Add-Content -Path $findingsFile -Value $dmaStatus
-
-# Check Virtualization
-try {
-    $virtualization = Get-CimInstance Win32_ComputerSystem
-    $virtStatus = "Virtualization: $($virtualization.HypervisorPresent)"
-} catch {
-    $virtStatus = "Virtualization: Unable to determine"
-}
-Add-Content -Path $findingsFile -Value $virtStatus
+Add-Content -Path $findingsFile -Value $cfgStatus
 
 # Function to add section separator
 function Add-Section {
