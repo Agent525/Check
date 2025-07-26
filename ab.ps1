@@ -123,6 +123,17 @@ do {
 $totalSections = 23  # Updated to include new signature analysis section
 $currentSection = 0
 
+# Global array to collect all executable and DLL paths for advanced signature detection
+$global:allExecutablePaths = @()
+
+# Function to add paths to global collection
+function Add-ExecutablePath {
+    param($Path)
+    if ($Path -and (Test-Path $Path) -and $Path -match "\.(exe|dll)$") {
+        $global:allExecutablePaths += $Path
+    }
+}
+
 function Update-Progress {
     param($ActivityName)
     $script:currentSection++
@@ -1546,6 +1557,122 @@ try {
     }
 } catch {
     Add-Content -Path $findingsFile -Value "Unable to access Recycle Bin"
+}
+
+Update-Progress "Performing advanced signature analysis..."
+
+# Advanced Signature Detection System
+Add-Section "Advanced Signature Analysis"
+try {
+    Write-Host "Performing advanced signature analysis on all discovered executables..." -ForegroundColor Cyan
+    
+    # Create paths.txt file with all discovered executable and DLL paths
+    $pathsFilePath = Join-Path $ssPath "paths.txt"
+    
+    # Remove duplicates and filter valid paths
+    $uniquePaths = $global:allExecutablePaths | Sort-Object -Unique | Where-Object { 
+        $_ -and (Test-Path $_) -and ($_ -match "\.(exe|dll)$") 
+    }
+    
+    if ($uniquePaths.Count -gt 0) {
+        # Write all paths to the file
+        $uniquePaths | Out-File -FilePath $pathsFilePath -Encoding UTF8
+        
+        Add-Content -Path $findingsFile -Value "Advanced signature analysis performed on $($uniquePaths.Count) executable/DLL files:"
+        Add-Content -Path $findingsFile -Value ""
+        
+        # Perform the advanced signature detection
+        $stopwatch = [Diagnostics.Stopwatch]::StartNew()
+        $results = @()
+        $count = 0
+        $totalCount = $uniquePaths.Count
+        
+        foreach ($path in $uniquePaths) {
+            $progress = [int]($count / $totalCount * 100)
+            Write-Progress -Activity "Advanced Signature Analysis" -Status "$progress% Complete: $path" -PercentComplete $progress
+            $count++
+            
+            try {
+                $fileName = Split-Path $path -Leaf
+                $signatureStatus = (Get-AuthenticodeSignature $path 2>$null).Status
+                
+                $fileDetails = New-Object PSObject
+                $fileDetails | Add-Member NoteProperty Name $fileName
+                $fileDetails | Add-Member NoteProperty Path $path
+                $fileDetails | Add-Member NoteProperty SignatureStatus $signatureStatus
+                
+                $results += $fileDetails
+                
+                # Add to findings file based on signature status
+                if ($signatureStatus -ne "Valid") {
+                    Add-Content -Path $findingsFile -Value "$path - Signature Status: $signatureStatus"
+                }
+            } catch {
+                # Skip files that can't be processed
+                Add-Content -Path $findingsFile -Value "$path - Error: Unable to check signature"
+            }
+        }
+        
+        $stopwatch.Stop()
+        $time = $stopwatch.Elapsed.Hours.ToString("00") + ":" + $stopwatch.Elapsed.Minutes.ToString("00") + ":" + $stopwatch.Elapsed.Seconds.ToString("00") + "." + $stopwatch.Elapsed.Milliseconds.ToString("000")
+        
+        # Save detailed results to a separate file
+        $signatureResultsFile = Join-Path $ssPath "SignatureAnalysis$timestamp.txt"
+        
+        Add-Content -Path $signatureResultsFile -Value "Advanced Signature Analysis Results"
+        Add-Content -Path $signatureResultsFile -Value "Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+        Add-Content -Path $signatureResultsFile -Value "Analysis Duration: $time"
+        Add-Content -Path $signatureResultsFile -Value "Total Files Analyzed: $($results.Count)"
+        Add-Content -Path $signatureResultsFile -Value ""
+        Add-Content -Path $signatureResultsFile -Value "="*80
+        Add-Content -Path $signatureResultsFile -Value ""
+        
+        # Group results by signature status
+        $validSigned = $results | Where-Object { $_.SignatureStatus -eq "Valid" }
+        $invalidSigned = $results | Where-Object { $_.SignatureStatus -ne "Valid" }
+        
+        Add-Content -Path $signatureResultsFile -Value "UNSIGNED/INVALID SIGNATURE FILES ($($invalidSigned.Count) files):"
+        Add-Content -Path $signatureResultsFile -Value "="*50
+        $invalidSigned | ForEach-Object {
+            Add-Content -Path $signatureResultsFile -Value "$($_.Path) - Status: $($_.SignatureStatus)"
+        }
+        
+        Add-Content -Path $signatureResultsFile -Value ""
+        Add-Content -Path $signatureResultsFile -Value "VALIDLY SIGNED FILES ($($validSigned.Count) files):"
+        Add-Content -Path $signatureResultsFile -Value "="*50
+        $validSigned | ForEach-Object {
+            Add-Content -Path $signatureResultsFile -Value "$($_.Path) - Status: $($_.SignatureStatus)"
+        }
+        
+        # Summary in main findings file
+        Add-Content -Path $findingsFile -Value ""
+        Add-Content -Path $findingsFile -Value "Signature Analysis Summary:"
+        Add-Content -Path $findingsFile -Value "  Total files analyzed: $($results.Count)"
+        Add-Content -Path $findingsFile -Value "  Valid signatures: $($validSigned.Count)"
+        Add-Content -Path $findingsFile -Value "  Invalid/Unsigned: $($invalidSigned.Count)"
+        Add-Content -Path $findingsFile -Value "  Analysis duration: $time"
+        Add-Content -Path $findingsFile -Value "  Detailed results saved to: SignatureAnalysis$timestamp.txt"
+        
+        Write-Host "Advanced signature analysis completed in $time" -ForegroundColor Green
+        Write-Host "Detailed results saved to: $signatureResultsFile" -ForegroundColor Cyan
+        
+        # Clean up paths.txt file
+        if (Test-Path $pathsFilePath) {
+            Remove-Item $pathsFilePath -Force -ErrorAction SilentlyContinue
+        }
+        
+    } else {
+        Add-Content -Path $findingsFile -Value "No executable or DLL files found for signature analysis"
+    }
+    
+} catch {
+    Add-Content -Path $findingsFile -Value "Unable to perform advanced signature analysis: $($_.Exception.Message)"
+    
+    # Cleanup on error
+    $pathsFilePath = Join-Path $ssPath "paths.txt"
+    if (Test-Path $pathsFilePath) {
+        Remove-Item $pathsFilePath -Force -ErrorAction SilentlyContinue
+    }
 }
 
 Update-Progress "Finalizing report..."
