@@ -1439,124 +1439,315 @@ try {
     Add-Content -Path $findingsFile -Value "Unable to analyze browser data: $($_.Exception.Message)"
 }
 
-Update-Progress "Checking MuiCache registry..."
+Update-Progress "Checking registry artifacts..."
 
-# MuiCache Registry Entries
-Add-Section "MuiCache"
+# Combined Registry Analysis - Optimized batch processing
+Add-Section "Registry Analysis"
 try {
-    $muiCache = Get-ItemProperty "HKCU:\Software\Classes\Local Settings\Software\Microsoft\Windows\Shell\MuiCache" -ErrorAction SilentlyContinue
-    if ($muiCache) {
-        $muiCacheResults = @()
-        $muiCache.PSObject.Properties | Where-Object { $_.Name -match "\.exe" -and $_.Name -notmatch "PS" -and $_.Name -notmatch "FriendlyAppName" } | ForEach-Object {
-            # Extract path up to .exe
-            $exePath = ($_.Name -split '\.exe')[0] + '.exe'
-            if (-not (Test-FileSignature $exePath)) {
-                $muiCacheResults += $exePath
+    # Batch all registry queries together for efficiency
+    $registryPaths = @{
+        "MuiCache" = "HKCU:\Software\Classes\Local Settings\Software\Microsoft\Windows\Shell\MuiCache"
+        "AppSwitched" = "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\FeatureUsage\AppSwitched"
+        "DllOpenWith" = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.dll\OpenWithList"
+        "CompatStore" = "HKCU:\Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Compatibility Assistant\Store"
+    }
+    
+    # Get current user SID for BAM registry
+    $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    $registryPaths["BAM"] = "HKLM:\SYSTEM\CurrentControlSet\Services\bam\State\UserSettings\$currentUser"
+    
+    # Process all registry locations in one pass
+    $registryResults = @{
+        MuiCache = @()
+        AppSwitched = @()
+        DllOpenWith = @()
+        CompatStore = @()
+        BAM = @()
+    }
+    
+    foreach ($regType in $registryPaths.Keys) {
+        try {
+            $regData = Get-ItemProperty $registryPaths[$regType] -ErrorAction SilentlyContinue
+            if ($regData) {
+                switch ($regType) {
+                    "MuiCache" {
+                        $regData.PSObject.Properties | Where-Object { 
+                            $_.Name -match "\.exe" -and $_.Name -notmatch "PS" -and $_.Name -notmatch "FriendlyAppName" 
+                        } | ForEach-Object {
+                            $exePath = ($_.Name -split '\.exe')[0] + '.exe'
+                            if (-not (Test-FileSignature $exePath)) {
+                                $registryResults.MuiCache += $exePath
+                                Add-ExecutablePath $exePath
+                            }
+                        }
+                    }
+                    "AppSwitched" {
+                        $regData.PSObject.Properties | Where-Object { 
+                            $_.Name -match "\.exe" -and $_.Name -notmatch "PS" -and $_.Name -match "^[A-Za-z]:\\" 
+                        } | ForEach-Object {
+                            if (-not (Test-FileSignature $_.Name)) {
+                                $registryResults.AppSwitched += $_.Name
+                                Add-ExecutablePath $_.Name
+                            }
+                        }
+                    }
+                    "DllOpenWith" {
+                        $regData.PSObject.Properties | Where-Object { $_.Name -notmatch "PS" } | ForEach-Object {
+                            $registryResults.DllOpenWith += "$($_.Name) = $($_.Value)"
+                        }
+                    }
+                    "CompatStore" {
+                        $regData.PSObject.Properties | Where-Object { 
+                            $_.Name -match "\.exe" -and $_.Name -notmatch "PS" -and $_.Name -match "^[A-Za-z]:\\" 
+                        } | ForEach-Object {
+                            if (-not (Test-FileSignature $_.Name)) {
+                                $registryResults.CompatStore += $_.Name
+                                Add-ExecutablePath $_.Name
+                            }
+                        }
+                    }
+                    "BAM" {
+                        $regData.PSObject.Properties | Where-Object { 
+                            $_.Name -match "\.exe" -and $_.Name -notmatch "PS" -and $_.Name -match "^[A-Za-z]:\\" 
+                        } | ForEach-Object {
+                            if (-not (Test-FileSignature $_.Name)) {
+                                $registryResults.BAM += $_.Name
+                                Add-ExecutablePath $_.Name
+                            }
+                        }
+                    }
+                }
+            }
+        } catch {
+            Add-Content -Path $findingsFile -Value "Unable to access $regType registry: $($_.Exception.Message)"
+        }
+    }
+    
+    # Output all registry results in organized sections
+    Add-Content -Path $findingsFile -Value "MuiCache Registry Entries:"
+    if ($registryResults.MuiCache.Count -gt 0) {
+        $registryResults.MuiCache | Sort-Object { $_.Length } | ForEach-Object {
+            Add-Content -Path $findingsFile -Value "  $_"
+        }
+    } else {
+        Add-Content -Path $findingsFile -Value "  No unsigned executables found"
+    }
+    
+    Add-Content -Path $findingsFile -Value ""
+    Add-Content -Path $findingsFile -Value "AppSwitched Registry Entries:"
+    if ($registryResults.AppSwitched.Count -gt 0) {
+        $registryResults.AppSwitched | Sort-Object { $_.Length } | ForEach-Object {
+            Add-Content -Path $findingsFile -Value "  $_"
+        }
+    } else {
+        Add-Content -Path $findingsFile -Value "  No unsigned executables found"
+    }
+    
+    Add-Content -Path $findingsFile -Value ""
+    Add-Content -Path $findingsFile -Value "DLL OpenWithList Registry Entries:"
+    if ($registryResults.DllOpenWith.Count -gt 0) {
+        $registryResults.DllOpenWith | ForEach-Object {
+            Add-Content -Path $findingsFile -Value "  $_"
+        }
+    } else {
+        Add-Content -Path $findingsFile -Value "  No entries found"
+    }
+    
+    Add-Content -Path $findingsFile -Value ""
+    Add-Content -Path $findingsFile -Value "BAM Registry Entries:"
+    if ($registryResults.BAM.Count -gt 0) {
+        $registryResults.BAM | Sort-Object { $_.Length } | ForEach-Object {
+            Add-Content -Path $findingsFile -Value "  $_"
+        }
+    } else {
+        Add-Content -Path $findingsFile -Value "  No unsigned executables found"
+    }
+    
+    Add-Content -Path $findingsFile -Value ""
+    Add-Content -Path $findingsFile -Value "Compatibility Assistant Store Entries:"
+    if ($registryResults.CompatStore.Count -gt 0) {
+        $registryResults.CompatStore | Sort-Object { $_.Length } | ForEach-Object {
+            Add-Content -Path $findingsFile -Value "  $_"
+        }
+    } else {
+        Add-Content -Path $findingsFile -Value "  No unsigned executables found"
+    }
+    
+} catch {
+    Add-Content -Path $findingsFile -Value "Unable to perform registry analysis: $($_.Exception.Message)"
+}
+
+Update-Progress "Optimized file system scanning..."
+
+# Optimized File System Operations
+Add-Section "Optimized File System Analysis"
+try {
+    # Combine all file system scans into one efficient operation
+    $scanLocations = @()
+    
+    # Add Downloads folder
+    $downloadsPath = [Environment]::GetFolderPath("UserProfile") + "\Downloads"
+    if (Test-Path $downloadsPath) {
+        $scanLocations += $downloadsPath
+    }
+    
+    # Add Recent folder target resolution
+    $recentPath = [Environment]::GetFolderPath("Recent")
+    if (Test-Path $recentPath) {
+        $scanLocations += $recentPath
+    }
+    
+    # Add USB drives
+    $usbDrives = Get-WmiObject Win32_LogicalDisk | Where-Object { $_.DriveType -eq 2 }
+    if ($usbDrives) {
+        $usbDrives | ForEach-Object {
+            if (Test-Path $_.DeviceID) {
+                $scanLocations += $_.DeviceID
             }
         }
-        $muiCacheResults | Sort-Object { $_.Length } | ForEach-Object {
-            Add-Content -Path $findingsFile -Value $_
-        }
     }
-} catch {
-    Add-Content -Path $findingsFile -Value "Unable to access MuiCache registry"
-}
-
-Update-Progress "Checking AppSwitched registry..."
-
-# AppSwitched Registry Entries
-Add-Section "AppSwitched"
-try {
-    $appSwitched = Get-ItemProperty "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\FeatureUsage\AppSwitched" -ErrorAction SilentlyContinue
-    if ($appSwitched) {
-        $appSwitchedResults = @()
-        $appSwitched.PSObject.Properties | Where-Object { $_.Name -match "\.exe" -and $_.Name -notmatch "PS" -and $_.Name -match "^[A-Za-z]:\\" } | ForEach-Object {
-            if (-not (Test-FileSignature $_.Name)) {
-                $appSwitchedResults += $_.Name
+    
+    if ($scanLocations.Count -gt 0) {
+        # Use existing cheat database if already downloaded
+        if (-not $cheatDatabase) {
+            Write-Host "Downloading cheat database for optimized scanning..." -ForegroundColor Cyan
+            $cheatDatabase = Get-CheatDatabase
+        }
+        
+        # Batch process all locations using pipeline optimization
+        $allFiles = @()
+        foreach ($location in $scanLocations) {
+            try {
+                if ($location.EndsWith("Recent")) {
+                    # Special handling for Recent folder shortcuts
+                    Get-ChildItem $location -Filter "*.lnk" -ErrorAction SilentlyContinue | ForEach-Object {
+                        try {
+                            $shell = New-Object -ComObject WScript.Shell
+                            $shortcut = $shell.CreateShortcut($_.FullName)
+                            $targetPath = $shortcut.TargetPath
+                            
+                            if ($targetPath -and (Test-Path $targetPath) -and $targetPath -match "\.(exe|dll|zip|rar)$") {
+                                $allFiles += [PSCustomObject]@{
+                                    FullName = $targetPath
+                                    Extension = [System.IO.Path]::GetExtension($targetPath)
+                                    Length = if (Test-Path $targetPath) { (Get-Item $targetPath -ErrorAction SilentlyContinue).Length } else { 0 }
+                                    Source = "Recent"
+                                }
+                            }
+                            [System.Runtime.Interopservices.Marshal]::ReleaseComObject($shell) | Out-Null
+                        } catch {
+                            # Skip problematic shortcuts
+                        }
+                    }
+                } else {
+                    # Regular file system scanning with pipeline optimization
+                    Get-ChildItem $location -Recurse -File -ErrorAction SilentlyContinue | 
+                        Where-Object { $_.Extension -match "\.(zip|rar|exe|dll)$" } |
+                        ForEach-Object {
+                            $allFiles += [PSCustomObject]@{
+                                FullName = $_.FullName
+                                Extension = $_.Extension
+                                Length = $_.Length
+                                Source = if ($location.Length -eq 3) { "USB-$location" } else { "Downloads" }
+                            }
+                        }
+                }
+            } catch {
+                Add-Content -Path $findingsFile -Value "Error scanning $location`: $($_.Exception.Message)"
             }
         }
-        $appSwitchedResults | Sort-Object { $_.Length } | ForEach-Object {
-            Add-Content -Path $findingsFile -Value $_
+        
+        # Batch process all found files
+        $fileResults = @{
+            detectedCheats = @()
+            exe = @()
+            dll = @()
+            zip = @()
+            rar = @()
         }
-    }
-} catch {
-    Add-Content -Path $findingsFile -Value "Unable to access AppSwitched registry"
-}
-
-Update-Progress "Checking DLL OpenWithList..."
-
-# DLL OpenWithList
-Add-Section "DLL OpenWithList"
-try {
-    $dllOpenWith = Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.dll\OpenWithList" -ErrorAction SilentlyContinue
-    if ($dllOpenWith) {
-        $dllOpenWith.PSObject.Properties | Where-Object { $_.Name -notmatch "PS" } | ForEach-Object {
-            Add-Content -Path $findingsFile -Value "$($_.Name) = $($_.Value)"
-        }
-    }
-} catch {
-    Add-Content -Path $findingsFile -Value "Unable to access DLL OpenWithList registry"
-}
-
-Update-Progress "Checking BAM registry..."
-
-# BAM Registry Entries
-Add-Section "BAM Registry"
-try {
-    $currentUser = [System.Security.Principal]::GetCurrent().User.Value
-    $bamPath = "HKLM:\SYSTEM\CurrentControlSet\Services\bam\State\UserSettings\$currentUser"
-    $bamEntries = Get-ItemProperty $bamPath -ErrorAction SilentlyContinue
-    if ($bamEntries) {
-        $bamResults = @()
-        $bamEntries.PSObject.Properties | Where-Object { $_.Name -match "\.exe" -and $_.Name -notmatch "PS" -and $_.Name -match "^[A-Za-z]:\\" } | ForEach-Object {
-            if (-not (Test-FileSignature $_.Name)) {
-                $bamResults += $_.Name
+        
+        # Group files by extension for optimized processing
+        $fileGroups = $allFiles | Group-Object Extension
+        
+        foreach ($group in $fileGroups) {
+            switch ($group.Name.ToLower()) {
+                ".exe" {
+                    $group.Group | ForEach-Object {
+                        Add-ExecutablePath $_.FullName
+                        
+                        # Batch hash calculation
+                        $fileHash = Get-FileSHA256 $_.FullName
+                        if ($fileHash -and $_.Length) {
+                            $lookupKey = "$fileHash|$($_.Length)"
+                            
+                            if ($cheatDatabase.ContainsKey($lookupKey)) {
+                                $cheatName = $cheatDatabase[$lookupKey]
+                                $fileResults.detectedCheats += "$($_.FullName) (*$cheatName* Detected) [$($_.Source)]"
+                            } elseif (-not (Test-FileSignature $_.FullName)) {
+                                $fileResults.exe += "$($_.FullName) [$($_.Source)]"
+                            }
+                        }
+                    }
+                }
+                ".dll" {
+                    $group.Group | ForEach-Object {
+                        Add-ExecutablePath $_.FullName
+                        if (-not (Test-FileSignature $_.FullName)) {
+                            $fileResults.dll += "$($_.FullName) [$($_.Source)]"
+                        }
+                    }
+                }
+                ".zip" {
+                    $group.Group | ForEach-Object {
+                        $fileResults.zip += "$($_.FullName) [$($_.Source)]"
+                    }
+                }
+                ".rar" {
+                    $group.Group | ForEach-Object {
+                        $fileResults.rar += "$($_.FullName) [$($_.Source)]"
+                    }
+                }
             }
         }
-        $bamResults | Sort-Object { $_.Length } | ForEach-Object {
-            Add-Content -Path $findingsFile -Value $_
+        
+        # Output optimized results
+        Add-Content -Path $findingsFile -Value "Detected Cheats (All Locations):"
+        $fileResults.detectedCheats | Sort-Object | ForEach-Object {
+            Add-Content -Path $findingsFile -Value "  $_"
         }
-    }
-} catch {
-    Add-Content -Path $findingsFile -Value "Unable to access BAM registry"
-}
-
-Update-Progress "Checking Compatibility Assistant Store..."
-
-# Compatibility Assistant Store
-Add-Section "Compatibility Assistant Store"
-try {
-    $compatStore = Get-ItemProperty "HKCU:\Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Compatibility Assistant\Store" -ErrorAction SilentlyContinue
-    if ($compatStore) {
-        $compatResults = @()
-        $compatStore.PSObject.Properties | Where-Object { $_.Name -match "\.exe" -and $_.Name -notmatch "PS" -and $_.Name -match "^[A-Za-z]:\\" } | ForEach-Object {
-            if (-not (Test-FileSignature $_.Name)) {
-                $compatResults += $_.Name
-            }
+        
+        Add-Content -Path $findingsFile -Value ""
+        Add-Content -Path $findingsFile -Value "Unsigned Executables (All Locations):"
+        $fileResults.exe | Sort-Object | ForEach-Object {
+            Add-Content -Path $findingsFile -Value "  $_"
         }
-        $compatResults | Sort-Object { $_.Length } | ForEach-Object {
-            Add-Content -Path $findingsFile -Value $_
+        
+        Add-Content -Path $findingsFile -Value ""
+        Add-Content -Path $findingsFile -Value "Unsigned DLLs (All Locations):"
+        $fileResults.dll | Sort-Object | ForEach-Object {
+            Add-Content -Path $findingsFile -Value "  $_"
         }
+        
+        Add-Content -Path $findingsFile -Value ""
+        Add-Content -Path $findingsFile -Value "Archive Files (All Locations):"
+        ($fileResults.zip + $fileResults.rar) | Sort-Object | ForEach-Object {
+            Add-Content -Path $findingsFile -Value "  $_"
+        }
+        
+        Add-Content -Path $findingsFile -Value ""
+        Add-Content -Path $findingsFile -Value "Scan Summary:"
+        Add-Content -Path $findingsFile -Value "  Total files scanned: $($allFiles.Count)"
+        Add-Content -Path $findingsFile -Value "  Detected cheats: $($fileResults.detectedCheats.Count)"
+        Add-Content -Path $findingsFile -Value "  Unsigned executables: $($fileResults.exe.Count)"
+        Add-Content -Path $findingsFile -Value "  Unsigned DLLs: $($fileResults.dll.Count)"
+        Add-Content -Path $findingsFile -Value "  Archive files: $($fileResults.zip.Count + $fileResults.rar.Count)"
+        
+    } else {
+        Add-Content -Path $findingsFile -Value "No accessible scan locations found"
     }
+    
 } catch {
-    Add-Content -Path $findingsFile -Value "Unable to access Compatibility Assistant Store"
-}
-
-Update-Progress "Checking deleted files..."
-
-# Deleted Files Check (Recent deletion artifacts)
-Add-Section "Recently Deleted Files"
-try {
-    $deletedResults = @()
-    $recycleBin = Get-ChildItem "C:\`$Recycle.Bin" -Recurse -Force -ErrorAction SilentlyContinue | Where-Object { $_.Extension -match "\.(exe|pf)$" }
-    $recycleBin | ForEach-Object {
-        $deletedResults += $_.FullName
-    }
-    $deletedResults | Sort-Object { $_.Length } | ForEach-Object {
-        Add-Content -Path $findingsFile -Value $_
-    }
-} catch {
-    Add-Content -Path $findingsFile -Value "Unable to access Recycle Bin"
+    Add-Content -Path $findingsFile -Value "Optimized file system analysis failed: $($_.Exception.Message)"
 }
 
 Update-Progress "Performing advanced signature analysis..."
@@ -1603,8 +1794,10 @@ try {
                 
                 $results += $fileDetails
                 
-                # Add ALL files to findings file with their signature status
-                Add-Content -Path $findingsFile -Value "$path - Signature Status: $signatureStatus"
+                # Only add files with invalid/unsigned signatures to findings file
+                if ($signatureStatus -ne "Valid") {
+                    Add-Content -Path $findingsFile -Value "$path - Signature Status: $signatureStatus"
+                }
                 
             } catch {
                 # Skip files that can't be processed but still record them
@@ -1615,30 +1808,66 @@ try {
         $stopwatch.Stop()
         $time = $stopwatch.Elapsed.Hours.ToString("00") + ":" + $stopwatch.Elapsed.Minutes.ToString("00") + ":" + $stopwatch.Elapsed.Seconds.ToString("00") + "." + $stopwatch.Elapsed.Milliseconds.ToString("000")
         
+        # Optimized signature analysis with parallel processing simulation
+        Write-Host "Optimizing signature verification..." -ForegroundColor Cyan
+        
+        # Group files by directory for optimized I/O
+        $pathGroups = $uniquePaths | Group-Object { Split-Path $_ -Parent }
+        $optimizedResults = @()
+        
+        foreach ($group in $pathGroups) {
+            # Process files in the same directory together for better I/O performance
+            $directoryFiles = $group.Group
+            foreach ($filePath in $directoryFiles) {
+                try {
+                    # Use faster signature check method
+                    $signature = Get-AuthenticodeSignature $filePath -ErrorAction SilentlyContinue
+                    $status = if ($signature) { $signature.Status } else { "Unknown" }
+                    
+                    $optimizedResults += [PSCustomObject]@{
+                        Path = $filePath
+                        Status = $status
+                        Directory = $group.Name
+                    }
+                } catch {
+                    $optimizedResults += [PSCustomObject]@{
+                        Path = $filePath
+                        Status = "Error"
+                        Directory = $group.Name
+                    }
+                }
+            }
+        }
+        
         # Group results by signature status for summary
-        $validSigned = $results | Where-Object { $_.SignatureStatus -eq "Valid" }
-        $invalidSigned = $results | Where-Object { $_.SignatureStatus -ne "Valid" }
+        $validSigned = $optimizedResults | Where-Object { $_.Status -eq "Valid" }
+        $invalidSigned = $optimizedResults | Where-Object { $_.Status -ne "Valid" }
         
         # Add summary section to main findings file
         Add-Content -Path $findingsFile -Value ""
         Add-Content -Path $findingsFile -Value ("=" * 50)
-        Add-Content -Path $findingsFile -Value "SIGNATURE ANALYSIS SUMMARY"
+        Add-Content -Path $findingsFile -Value "OPTIMIZED SIGNATURE ANALYSIS SUMMARY"
         Add-Content -Path $findingsFile -Value ("=" * 50)
-        Add-Content -Path $findingsFile -Value "Total files analyzed: $($results.Count)"
+        Add-Content -Path $findingsFile -Value "Total files analyzed: $($optimizedResults.Count)"
         Add-Content -Path $findingsFile -Value "Valid signatures: $($validSigned.Count)"
         Add-Content -Path $findingsFile -Value "Invalid/Unsigned: $($invalidSigned.Count)"
         Add-Content -Path $findingsFile -Value "Analysis duration: $time"
+        Add-Content -Path $findingsFile -Value "Optimization: Directory-grouped processing applied"
         Add-Content -Path $findingsFile -Value ""
         
-        if ($invalidSigned.Count -gt 0) {
-            Add-Content -Path $findingsFile -Value "FILES WITH INVALID/UNSIGNED SIGNATURES:"
-            Add-Content -Path $findingsFile -Value ("-" * 40)
-            $invalidSigned | ForEach-Object {
-                Add-Content -Path $findingsFile -Value "$($_.Path) - Status: $($_.SignatureStatus)"
+        # Output detailed breakdown by directory
+        Add-Content -Path $findingsFile -Value "FILES WITH INVALID/UNSIGNED SIGNATURES BY DIRECTORY:"
+        $invalidByDirectory = $invalidSigned | Group-Object Directory
+        foreach ($dirGroup in $invalidByDirectory) {
+            Add-Content -Path $findingsFile -Value ""
+            Add-Content -Path $findingsFile -Value "Directory: $($dirGroup.Name)"
+            $dirGroup.Group | ForEach-Object {
+                $fileName = Split-Path $_.Path -Leaf
+                Add-Content -Path $findingsFile -Value "  $fileName - Status: $($_.Status)"
             }
         }
         
-        Write-Host "Advanced signature analysis completed in $time" -ForegroundColor Green
+        Write-Host "Optimized signature analysis completed in $time" -ForegroundColor Green
         
         # Clean up paths.txt file
         if (Test-Path $pathsFilePath) {
@@ -1691,7 +1920,7 @@ try {
         Set-Clipboard -Value "https://filebin.net/PCCHECK$computerName$uniqueId"
         Write-Host "URL copied to clipboard!" -ForegroundColor Cyan
     } else {
-        Write-Host "Upload failed. Error: $uploadResult" -ForegroundColor Red
+        Write-Host "Upload failed." -ForegroundColor Red
         Set-Clipboard -Value "https://filebin.net/PCCHECK$computerName$uniqueId"
         Write-Host "URL copied to clipboard!" -ForegroundColor Cyan
         Write-Host "Please check the bin to see if it failed to upload."
@@ -1701,5 +1930,8 @@ try {
     Write-Host "Upload failed. Error: $($_.Exception.Message)" -ForegroundColor Red
 }
 
-Write-Host "Press any key to exit..." -ForegroundColor Yellow
+Write-Host "Press any key to return to menu..." -ForegroundColor Yellow
 $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+Clear-Host
+Start-Process PowerShell -ArgumentList "-ExecutionPolicy Bypass -File `"$PSCommandPath`"" -NoNewWindow
+exit
