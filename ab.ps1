@@ -120,7 +120,7 @@ do {
 } while ($choice -notin @("1", "2", "3", "4"))
 
 # Initialize progress tracking
-$totalSections = 22
+$totalSections = 23  # Updated to include new signature analysis section
 $currentSection = 0
 
 function Update-Progress {
@@ -612,6 +612,9 @@ try {
                 try {
                     Get-ChildItem $driveLetter -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Extension -match "\.(zip|rar|exe|dll)$" } | ForEach-Object {
                         if ($_.Extension -eq ".exe") {
+                            # Add to global paths collection
+                            Add-ExecutablePath $_.FullName
+                            
                             # Calculate hash and get file size for executables
                             $fileHash = Get-FileSHA256 $_.FullName
                             $fileSize = $_.Length
@@ -625,6 +628,9 @@ try {
                                 $usbResults.exe += $_.FullName
                             }
                         } elseif ($_.Extension -eq ".dll") {
+                            # Add to global paths collection
+                            Add-ExecutablePath $_.FullName
+                            
                             if (-not (Test-FileSignature $_.FullName)) {
                                 $usbResults.dll += $_.FullName
                             }
@@ -684,6 +690,9 @@ try {
         
         Get-ChildItem $downloadsPath -Recurse | Where-Object { $_.Extension -match "\.(zip|rar|exe)$" } | ForEach-Object {
             if ($_.Extension -eq ".exe") {
+                # Add to global paths collection
+                Add-ExecutablePath $_.FullName
+                
                 # Calculate hash and get file size for all executables
                 $fileHash = Get-FileSHA256 $_.FullName
                 $fileSize = $_.Length
@@ -725,20 +734,104 @@ try {
     $prefetchPath = "C:\Windows\Prefetch"
     if (Test-Path $prefetchPath) {
         $prefetchResults = @()
-        Get-ChildItem $prefetchPath -Filter "*.pf" | ForEach-Object {
-            $prefetchResults += [PSCustomObject]@{
-                Name = $_.Name
-                LastWriteTime = $_.LastWriteTime
-                DisplayText = "$($_.Name) - $($_.LastWriteTime)"
+        $hashTable = @{
+        }
+        $suspiciousFiles = @{
+        }
+        
+        # Get all prefetch files
+        $files = Get-ChildItem $prefetchPath -Filter "*.pf"
+        
+        # Perform advanced analysis on each prefetch file
+        foreach ($file in $files) {
+            try {
+                # Check if file is read-only (suspicious)
+                if ($file.IsReadOnly) {
+                    if (-not $suspiciousFiles.ContainsKey($file.Name)) {
+                        $suspiciousFiles[$file.Name] = "$($file.Name) is read-only"
+                    }
+                }
+                
+                # Validate prefetch file header
+                $reader = [System.IO.StreamReader]::new($file.FullName)
+                $buffer = New-Object char[] 3
+                $null = $reader.ReadBlock($buffer, 0, 3)
+                $reader.Close()
+                
+                $firstThreeChars = -join $buffer
+                
+                if ($firstThreeChars -ne "MAM") {
+                    if (-not $suspiciousFiles.ContainsKey($file.Name)) {
+                        $suspiciousFiles[$file.Name] = "$($file.Name) is not a valid prefetch file"
+                    }
+                }
+                
+                # Calculate hash for duplicate detection
+                $hash = Get-FileHash -Path $file.FullName -Algorithm SHA256
+                
+                if ($hashTable.ContainsKey($hash.Hash)) {
+                    $hashTable[$hash.Hash].Add($file.Name)
+                } else {
+                    $hashTable[$hash.Hash] = [System.Collections.Generic.List[string]]::new()
+                    $hashTable[$hash.Hash].Add($file.Name)
+                }
+                
+                # Add to results for normal display
+                $prefetchResults += [PSCustomObject]@{
+                    Name = $file.Name
+                    LastWriteTime = $file.LastWriteTime
+                    DisplayText = "$($file.Name) - $($file.LastWriteTime)"
+                }
+                
+            } catch {
+                Add-Content -Path $findingsFile -Value "Error analyzing file $($file.FullName): $($_.Exception.Message)"
             }
         }
-        # Sort by LastWriteTime from oldest to newest (earliest to latest)
+        
+        # Check for duplicate hashes (indicating modified prefetch files)
+        $repeatedHashes = $hashTable.GetEnumerator() | Where-Object { $_.Value.Count -gt 1 }
+        
+        if ($repeatedHashes) {
+            foreach ($entry in $repeatedHashes) {
+                foreach ($file in $entry.Value) {
+                    if (-not $suspiciousFiles.ContainsKey($file)) {
+                        $suspiciousFiles[$file] = "$file was modified with type or echo"
+                    }
+                }
+            }
+        }
+        
+        # Output suspicious files first
+        if ($suspiciousFiles.Count -gt 0) {
+            Add-Content -Path $findingsFile -Value "Suspicious Prefetch Files:"
+            foreach ($key in $suspiciousFiles.Keys) {
+                Add-Content -Path $findingsFile -Value "  $key : $($suspiciousFiles[$key])"
+            }
+            Add-Content -Path $findingsFile -Value ""
+        }
+        
+        # Output all prefetch files sorted by time
+        Add-Content -Path $findingsFile -Value "All Prefetch Files (chronological order):"
         $prefetchResults | Sort-Object LastWriteTime | ForEach-Object {
             Add-Content -Path $findingsFile -Value $_.DisplayText
         }
+        
+        # Summary statistics
+        Add-Content -Path $findingsFile -Value ""
+        Add-Content -Path $findingsFile -Value "Prefetch Analysis Summary:"
+        Add-Content -Path $findingsFile -Value "  Total prefetch files: $($files.Count)"
+        Add-Content -Path $findingsFile -Value "  Suspicious files detected: $($suspiciousFiles.Count)"
+        Add-Content -Path $findingsFile -Value "  Duplicate hash groups: $($repeatedHashes.Count)"
+        
+        if ($suspiciousFiles.Count -eq 0) {
+            Add-Content -Path $findingsFile -Value "  Prefetch folder appears clean"
+        }
+        
+    } else {
+        Add-Content -Path $findingsFile -Value "Prefetch folder not found or inaccessible"
     }
 } catch {
-    Add-Content -Path $findingsFile -Value "Unable to access Prefetch folder"
+    Add-Content -Path $findingsFile -Value "Unable to access Prefetch folder: $($_.Exception.Message)"
 }
 
 Update-Progress "Checking Recent files..."
@@ -848,6 +941,9 @@ try {
                             # Check if file still exists for hash calculation
                             if (Test-Path $exePath) {
                                 try {
+                                    # Add to global paths collection
+                                    Add-ExecutablePath $exePath
+                                    
                                     $fileHash = Get-FileSHA256 $exePath
                                     $fileSize = (Get-Item $exePath -ErrorAction SilentlyContinue).Length
                                     
@@ -965,6 +1061,9 @@ try {
                         $extension = $targetFile.Extension.ToLower()
                         
                         if ($extension -eq ".exe") {
+                            # Add to global paths collection
+                            Add-ExecutablePath $targetFile.FullName
+                            
                             # Calculate hash and get file size for executables
                             $fileHash = Get-FileSHA256 $targetFile.FullName
                             $fileSize = $targetFile.Length
@@ -978,6 +1077,9 @@ try {
                                 $recentResults.exe += $targetFile.FullName
                             }
                         } elseif ($extension -eq ".dll") {
+                            # Add to global paths collection
+                            Add-ExecutablePath $targetFile.FullName
+                            
                             if (-not (Test-FileSignature $targetFile.FullName)) {
                                 $recentResults.dll += $targetFile.FullName
                             }
