@@ -1144,7 +1144,7 @@ try {
         "eulencheats.com", "lmarket.net", "battlelog.co", "cheatarmy.com", "cosmocheats.com",
         "ring-1.io", "skript.gg", "tzproject.com", "hxcheats.tech", "skycheats.com",
         "wh-satano.ru", "susano.re", "vape.gg", "neverlack.in", "liquidbounce.net", 
-        "gtav", "xeno", "project", "d3d10", "free", "r6", "macro", "script", "dumper", "exploit",
+        "gtav", "xeno", "project", "d3d10", "free", "r6", "macro", "script", "dumper", "exploit", "rpf",
         "hack", "hacks", "loader", "inject", "injector", "crack", "bypass", "cheatengine", "cheat engine"
     )
     $suspiciousDomains = @(".gg", ".cc", ".io", ".wtf", ".ru", ".xyz")
