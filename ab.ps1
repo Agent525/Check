@@ -78,6 +78,29 @@ do {
         }
         "3" {
             Write-Host "`nStarting Generic Analysis..." -ForegroundColor Green
+            
+            # Launch live checker in a new PowerShell window
+            try {
+                Write-Host "Opening Live System Checker..." -ForegroundColor Cyan
+                $lcScript = "https://raw.githubusercontent.com/Agent525/Check/refs/heads/main/lc.ps1"
+                
+                # Create PowerShell command to download and execute live checker
+                $lcCommand = "Clear-Host; Write-Host 'Downloading Live Checker...' -ForegroundColor Yellow; try { iex (Invoke-WebRequest -Uri '$lcScript' -UseBasicParsing).Content } catch { Write-Host 'Failed to download Live Checker: `$(`$_.Exception.Message)' -ForegroundColor Red; Write-Host 'Press any key to exit...' -ForegroundColor Gray; `$null = `$Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown') }"
+                
+                # Start new PowerShell window with live checker
+                Start-Process PowerShell -ArgumentList "-ExecutionPolicy Bypass", "-NoExit", "-Command", $lcCommand -WindowStyle Normal
+                
+                Write-Host "Live Checker window opened successfully!" -ForegroundColor Green
+                Write-Host "Continuing with Generic Analysis..." -ForegroundColor Green
+                
+                # Brief pause to allow live checker to start
+                Start-Sleep -Seconds 2
+                
+            } catch {
+                Write-Host "Warning: Unable to open Live Checker window: $($_.Exception.Message)" -ForegroundColor Yellow
+                Write-Host "Continuing with Generic Analysis..." -ForegroundColor Green
+            }
+            
             break
         }
         "4" {
